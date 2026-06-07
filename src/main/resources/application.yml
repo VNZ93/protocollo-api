@@ -2,6 +2,10 @@ spring:
   application:
     name: protocollo-api
 
+  # Profilo attivo: "dev" (storage locale) di default, "prod" per S3/MinIO.
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
   # --- Database (PostgreSQL) ---
   # I valori si possono sovrascrivere con variabili d'ambiente (utile in Docker/Kubernetes).
   datasource:
@@ -39,6 +43,19 @@ spring:
       properties:
         # Non aggiungiamo header con il tipo Java: i consumer possono essere scritti in altri linguaggi
         spring.json.add.type.headers: false
+    consumer:
+      group-id: protocollo-indice
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Avvolgo il JsonDeserializer in un ErrorHandlingDeserializer: un messaggio
+      # malformato ("poison pill") non blocca il consumo, viene solo scartato.
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: dev.protocollo.messaging
+        # L'indice esterno non invia header di tipo: uso un tipo di default
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: dev.protocollo.messaging.IndiceAggiornamentoEvent
 
 # --- Proprieta applicative personalizzate ---
 app:
@@ -47,8 +64,14 @@ app:
     # Deve essere lunga almeno 32 caratteri (256 bit) per l'algoritmo HMAC-SHA256.
     secret: ${JWT_SECRET:chiave-segreta-di-sviluppo-da-cambiare-in-produzione-1234567890}
     expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
+    refresh-expiration-days: ${JWT_REFRESH_EXPIRATION_DAYS:7}
   kafka:
     topic-protocollazione: ${KAFKA_TOPIC:protocollo.documenti.protocollazione}
+    topic-indice: ${KAFKA_TOPIC_INDICE:protocollo.indice.aggiornamenti}
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    capacity: ${RATE_LIMIT_CAPACITY:100}
+    refill-per-minute: ${RATE_LIMIT_REFILL:100}
 
 # --- Documentazione OpenAPI / Swagger ---
 springdoc:

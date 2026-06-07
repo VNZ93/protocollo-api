@@ -1,5 +1,6 @@
 package dev.protocollo.web;
 
+import dev.protocollo.service.RefreshTokenNonValidoException;
 import dev.protocollo.service.RisorsaNonTrovataException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,6 +11,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.stream.Collectors;
 
@@ -43,6 +45,12 @@ public class GlobalExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Credenziali non valide");
     }
 
+    /** Refresh token mancante, scaduto o revocato: 401 Unauthorized. */
+    @ExceptionHandler(RefreshTokenNonValidoException.class)
+    public ProblemDetail gestisciRefreshNonValido(RefreshTokenNonValidoException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
+    }
+
     /** Errori di validazione dei DTO in input: 400 Bad Request con i dettagli. */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ProblemDetail gestisciValidazione(MethodArgumentNotValidException ex) {
@@ -50,6 +58,13 @@ public class GlobalExceptionHandler {
                 .map(errore -> errore.getField() + ": " + errore.getDefaultMessage())
                 .collect(Collectors.joining("; "));
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, dettagli);
+    }
+
+    /** Parametro di richiesta con tipo non valido (es. stato inesistente): 400. */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ProblemDetail gestisciTipoParametroErrato(MethodArgumentTypeMismatchException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "Valore non valido per il parametro '" + ex.getName() + "'");
     }
 
     /** Rete di sicurezza: qualsiasi errore non previsto diventa un 500. */

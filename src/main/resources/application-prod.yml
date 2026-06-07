@@ -1,0 +1,12 @@
+# Profilo "prod": storage dei PDF su object storage S3-compatibile (AWS S3 o MinIO).
+# In produzione i valori vanno passati come variabili d'ambiente / segreti.
+app:
+  storage:
+    s3:
+      endpoint: ${S3_ENDPOINT:http://localhost:9000}
+      region: ${S3_REGION:us-east-1}
+      access-key: ${S3_ACCESS_KEY:minioadmin}
+      secret-key: ${S3_SECRET_KEY:minioadmin}
+      bucket: ${S3_BUCKET:protocollo}
+      # MinIO richiede il path-style (bucket nel path, non come sottodominio)
+      path-style: ${S3_PATH_STYLE:true}

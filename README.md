@@ -16,16 +16,19 @@ in un'applicazione Java moderna.
 | Ambito           | Tecnologia / approccio                                                        |
 |------------------|------------------------------------------------------------------------------|
 | Linguaggio       | Java 21                                                                       |
-| Framework        | Spring Boot 3.3 (Web, Validation, Data JPA, Security, Actuator)               |
-| Sicurezza        | Spring Security con autenticazione **JWT** stateless e filter chain dedicata  |
+| Framework        | Spring Boot 3.3 (Web, Validation, Data JPA, Security, Cache, Actuator)        |
+| Sicurezza        | Spring Security con **JWT** stateless, filter chain dedicata e **refresh token** |
 | Autorizzazione   | Ruoli nel token, `@PreAuthorize` e `@AuthenticationPrincipal` per i permessi  |
-| Persistenza      | Hibernate / JPA su **PostgreSQL**                                             |
+| Persistenza      | Hibernate / JPA su **PostgreSQL**, ricerche dinamiche con Specification        |
 | Migrazioni DB    | **Flyway** (schema versionato in SQL)                                         |
-| Messaggistica    | **Kafka** (evento di protocollazione su POST e PUT)                           |
+| Messaggistica    | **Kafka**: producer (protocollazione) e **consumer** (aggiornamenti indice)   |
+| Generazione file | **PDF** del documento (OpenPDF) salvato su **object storage**                  |
+| Object storage   | Filesystem locale (profilo `dev`) o **S3/MinIO** (profilo `prod`)             |
+| Prestazioni      | **Cache** (Caffeine) sulle GET e **rate limiting** (token bucket) per IP       |
 | Documentazione   | **OpenAPI / Swagger UI**                                                      |
 | Osservabilita    | Logging con id di correlazione (MDC) + Spring Boot Actuator                   |
 | Test             | **JUnit 5**, **Mockito**, MockMvc e **Testcontainers** per l'integrazione     |
-| Build & Deploy   | Maven, Dockerfile multi-stage, Docker Compose                                 |
+| Build & Deploy   | Maven, profili `dev`/`prod`, Dockerfile multi-stage, Docker Compose            |
 
 ---
 
@@ -34,33 +37,45 @@ in un'applicazione Java moderna.
 L'applicazione e organizzata a livelli, con responsabilita separate:
 
 ```
-web (controller, DTO, gestione errori)
-        |
-        v
-service (logica di business, permessi, eventi)
-        |
-        v
-repository (Spring Data / Hibernate)  --->  PostgreSQL
-        |
-        +--> messaging (producer Kafka)  --->  Kafka
+                      Kafka (indice esterno)
+                              |
+                              v
+                       messaging (consumer)
+                              |
+web (controller, DTO, errori) |
+        |                     |
+        v                     v
+service (logica, permessi, PDF, eventi, cache)
+        |                  |              |
+        v                  v              v
+repository (JPA)     storage (PDF)   messaging (producer)
+        |                  |              |
+        v                  v              v
+   PostgreSQL       FS locale / S3      Kafka
 ```
 
 ```
 src/main/java/dev/protocollo
 ├── ProtocolloApplication.java        punto di ingresso
-├── config/                           configurazioni (security, openapi, kafka, seeding)
+├── config/                           security, openapi, kafka, cache, seeding
 ├── security/                         JWT, filtro, UserDetails, principal
 ├── web/                              controller REST, DTO, exception handler
-├── service/                          logica applicativa
-├── repository/                       repository Spring Data JPA
+├── service/                          logica applicativa (documenti, refresh token)
+├── repository/                       repository JPA, Specification e filtri
 ├── domain/                           entita JPA ed enum
-├── messaging/                        evento e producer Kafka
-└── common/logging/                   filtro di logging con id di correlazione
+├── messaging/                        eventi, producer e consumer Kafka
+├── pdf/                              generazione del PDF (OpenPDF)
+├── storage/                          object storage: interfaccia + locale + S3
+└── common/
+    ├── logging/                      filtro di logging con id di correlazione
+    └── ratelimit/                    filtro di rate limiting (token bucket)
 
 src/main/resources
-├── application.yml                   configurazione
+├── application.yml                   configurazione comune
+├── application-dev.yml               profilo dev (storage locale)
+├── application-prod.yml              profilo prod (storage S3/MinIO)
 ├── logback-spring.xml                formato dei log
-└── db/migration/                     migrazioni Flyway (V1, V2)
+└── db/migration/                     migrazioni Flyway (V1..V4)
 ```
 
 ---
@@ -78,8 +93,9 @@ src/main/resources
 docker compose up -d
 ```
 
-Questo avvia PostgreSQL (porta 5432), Kafka (porta 9092) e una Kafka UI su
-http://localhost:8081 per ispezionare i messaggi.
+Questo avvia PostgreSQL (porta 5432), Kafka (porta 9092), una Kafka UI su
+http://localhost:8081 per ispezionare i messaggi e MinIO (object storage) con
+console su http://localhost:9001 (utente/password: `minioadmin`).
 
 ### 2. Avvia l'applicazione
 
@@ -98,6 +114,7 @@ docker compose --profile app up -d --build
 ```
 
 Avvia infrastruttura **e** applicazione, gia configurate per comunicare tra loro.
+In questa modalita l'app gira in profilo `prod` e usa MinIO come object storage.
 
 ---
 
@@ -122,10 +139,15 @@ curl -X POST http://localhost:8080/api/auth/login \
   -d '{"username":"admin","password":"admin123"}'
 ```
 
-Risposta:
+Risposta (access token di breve durata + refresh token revocabile):
 
 ```json
-{ "token": "eyJhbGciOi...", "tipo": "Bearer", "nome": "Amministratore di sistema" }
+{
+  "accessToken": "eyJhbGciOi...",
+  "refreshToken": "0b5f...-uuid",
+  "tipo": "Bearer",
+  "nome": "Amministratore di sistema"
+}
 ```
 
 ### 2. Chiamare gli endpoint protetti con il token
@@ -147,13 +169,19 @@ Trovi tutte le chiamate pronte all'uso anche nel file [`api.http`](api.http).
 
 ### Endpoint disponibili
 
-| Metodo | Percorso               | Descrizione                       | Permessi                  |
-|--------|------------------------|-----------------------------------|---------------------------|
-| POST   | `/api/auth/login`      | Login, restituisce il token JWT   | pubblico                  |
-| GET    | `/api/documenti`       | Elenco paginato                   | autenticato               |
-| GET    | `/api/documenti/{id}`  | Dettaglio singolo                 | autenticato               |
-| POST   | `/api/documenti`       | Crea un documento + evento Kafka  | ruolo USER o ADMIN        |
-| PUT    | `/api/documenti/{id}`  | Aggiorna + evento Kafka           | proprietario o ADMIN      |
+| Metodo | Percorso                  | Descrizione                          | Permessi              |
+|--------|---------------------------|--------------------------------------|-----------------------|
+| POST   | `/api/auth/login`         | Login, restituisce access + refresh  | pubblico              |
+| POST   | `/api/auth/refresh`       | Nuova coppia di token (con rotazione)| pubblico              |
+| POST   | `/api/auth/logout`        | Revoca il refresh token              | pubblico              |
+| GET    | `/api/documenti`          | Elenco paginato e filtrabile         | autenticato           |
+| GET    | `/api/documenti/{id}`     | Dettaglio singolo (con cache)        | autenticato           |
+| GET    | `/api/documenti/{id}/pdf` | Scarica il PDF dallo storage         | autenticato           |
+| POST   | `/api/documenti`          | Crea + genera PDF + evento Kafka     | ruolo USER o ADMIN    |
+| PUT    | `/api/documenti/{id}`     | Aggiorna + rigenera PDF + evento     | proprietario o ADMIN  |
+
+L'elenco supporta paginazione, ordinamento e filtri facoltativi, ad esempio:
+`GET /api/documenti?stato=PROTOCOLLATO&proprietario=mrossi&testo=determina&page=0&size=10&sort=dataCreazione,desc`
 
 ### Documentazione interattiva (Swagger)
 
@@ -178,6 +206,16 @@ Usa il pulsante **Authorize** per inserire il token e provare gli endpoint dal b
 L'autenticazione e **stateless**: non esiste sessione lato server, lo stato vive
 interamente nel token.
 
+### Access token e refresh token
+
+- L'**access token** e uno JWT di breve durata (default 60 minuti), stateless.
+- Il **refresh token** e un token opaco di lunga durata (default 7 giorni),
+  **persistito sul database** e quindi revocabile. Si usa su `/api/auth/refresh`
+  per ottenere un nuovo access token senza rifare il login.
+- A ogni refresh il token viene **ruotato**: il precedente e revocato e ne viene
+  emesso uno nuovo, riducendo la finestra di rischio in caso di furto. Il logout
+  (`/api/auth/logout`) revoca il refresh token.
+
 ---
 
 ## Eventi Kafka
@@ -196,12 +234,66 @@ Esempio di messaggio (JSON):
   "titolo": "Determina X",
   "numeroProtocollo": "PRT-2026-000003",
   "proprietario": "admin",
+  "pdfRiferimento": "documenti/PRT-2026-000003.pdf",
   "operazione": "CREAZIONE",
   "timestamp": "2026-06-07T10:15:30Z"
 }
 ```
 
 Puoi vedere i messaggi nella Kafka UI su http://localhost:8081.
+
+### Consumer: aggiornamenti dall'indice esterno
+
+Un consumer (`IndiceConsumer`) ascolta il topic
+`protocollo.indice.aggiornamenti`: simula un indice/sistema esterno che, dopo aver
+rielaborato una risorsa, segnala un cambio di stato. Il consumer allinea il
+documento locale (aggiorna lo stato, lo marca come indicizzato) e invalida la cache.
+
+Per provarlo, pubblica un messaggio sul topic (ad esempio dalla Kafka UI):
+
+```json
+{ "idDocumento": 1, "nuovoStato": "ARCHIVIATO", "origine": "motore-indicizzazione" }
+```
+
+Il deserializzatore e protetto da un `ErrorHandlingDeserializer`: un messaggio
+malformato viene scartato senza bloccare il consumo.
+
+---
+
+## Generazione PDF e object storage (profili dev / prod)
+
+Alla creazione (e a ogni aggiornamento) di un documento viene generato un **PDF**
+con OpenPDF e salvato su un object storage tramite l'interfaccia `DocumentStorage`.
+Il riferimento al file viene memorizzato sul documento ed e scaricabile da
+`GET /api/documenti/{id}/pdf`.
+
+L'implementazione dello storage cambia in base al **profilo Spring attivo**:
+
+| Profilo | Implementazione         | Dove finiscono i PDF                          |
+|---------|-------------------------|-----------------------------------------------|
+| `dev`   | `LocalFileSystemStorage`| cartella locale (`app.storage.local.directory`)|
+| `prod`  | `S3ObjectStorage`       | bucket S3 / MinIO (`app.storage.s3.*`)        |
+
+Il profilo predefinito e `dev`. Per usare lo storage S3:
+
+```bash
+SPRING_PROFILES_ACTIVE=prod mvn spring-boot:run
+```
+
+(con `docker compose --profile app up` l'app gira gia in `prod` verso MinIO).
+Grazie all'astrazione, la logica di business non sa quale storage e in uso: si
+cambia backend semplicemente cambiando profilo.
+
+---
+
+## Cache e rate limiting
+
+- **Cache** (Caffeine): la lettura del singolo documento (`GET /api/documenti/{id}`)
+  e messa in cache e invalidata automaticamente a ogni aggiornamento. La prima
+  lettura interroga il DB (cache miss), le successive no.
+- **Rate limiting**: un filtro applica un limite di richieste per indirizzo IP con
+  algoritmo "token bucket" (configurabile via `app.rate-limit.*`). Oltre il limite
+  risponde `429 Too Many Requests`. Documentazione e health check sono esclusi.
 
 ---
 
@@ -217,10 +309,12 @@ mvn test
 mvn verify
 ```
 
-- **Unit test** (`*Test`): `JwtServiceTest`, `DocumentoServiceTest` (Mockito),
-  `DocumentoControllerTest` (MockMvc sul solo livello web).
+- **Unit test** (`*Test`): `JwtServiceTest`, `DocumentoServiceTest` (Mockito, copre
+  anche PDF/storage e l'aggiornamento da indice), `DocumentoControllerTest`
+  (MockMvc sul solo livello web).
 - **Test di integrazione** (`*IT`): `DocumentoIntegrationIT` avvia PostgreSQL e
-  Kafka reali con Testcontainers ed esercita l'intero flusso login -> POST -> PUT -> GET.
+  Kafka reali con Testcontainers ed esercita l'intero flusso: login, creazione
+  (con generazione PDF), aggiornamento, download del PDF e refresh del token.
 
 ---
 
@@ -240,9 +334,10 @@ mvn verify
 
 ## Possibili estensioni
 
-Spunti per chi volesse ampliare l'esempio: refresh token, paginazione e filtri di
-ricerca piu ricchi, un consumer Kafka, cache, rate limiting, profili `dev`/`prod`
-distinti, pipeline CI/CD e manifest Kubernetes.
+Spunti per chi volesse ampliare l'esempio: rate limiting distribuito (es. Redis
+condiviso tra istanze), URL prefirmati per il download diretto dei PDF dallo
+storage, pattern outbox per la pubblicazione affidabile degli eventi Kafka,
+pipeline CI/CD e manifest Kubernetes.
 
 ---
 

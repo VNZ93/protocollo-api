@@ -24,4 +24,17 @@ public class KafkaTopicConfig {
                 .replicas(1)
                 .build();
     }
+
+    /**
+     * Topic in ingresso con gli aggiornamenti pubblicati dall'indice esterno,
+     * consumati da {@code IndiceConsumer}.
+     */
+    @Bean
+    public NewTopic topicIndice(
+            @Value("${app.kafka.topic-indice}") String nomeTopic) {
+        return TopicBuilder.name(nomeTopic)
+                .partitions(1)
+                .replicas(1)
+                .build();
+    }
 }

@@ -59,7 +59,23 @@ services:
       KAFKA_CLUSTERS_0_NAME: locale
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
 
-  # L'applicazione: avviata solo con il profilo "app"
+  # Object storage S3-compatibile per i PDF (usato dal profilo "prod").
+  # Console web di MinIO: http://localhost:9001 (utente/password: minioadmin)
+  minio:
+    image: minio/minio:latest
+    container_name: protocollo-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+
+  # L'applicazione: avviata solo con il profilo "app".
+  # Gira in profilo Spring "prod" cosi da usare MinIO come object storage.
   app:
     build: .
     container_name: protocollo-app
@@ -69,14 +85,22 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      minio:
+        condition: service_started
     ports:
       - "8080:8080"
     environment:
+      SPRING_PROFILES_ACTIVE: prod
       DB_URL: jdbc:postgresql://postgres:5432/protocollo
       DB_USERNAME: protocollo
       DB_PASSWORD: protocollo
       KAFKA_BOOTSTRAP: kafka:29092
       JWT_SECRET: chiave-segreta-di-sviluppo-da-cambiare-in-produzione-1234567890
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: protocollo
 
 volumes:
   postgres-data:
+  minio-data:

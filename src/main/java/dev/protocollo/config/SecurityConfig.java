@@ -1,6 +1,7 @@
 package dev.protocollo.config;
 
 import dev.protocollo.security.JwtAuthenticationFilter;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -62,6 +63,20 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    /**
+     * Disabilita la registrazione automatica del filtro JWT come filtro servlet
+     * globale: deve essere eseguito SOLO dentro la filter chain di Spring
+     * Security (dove lo inseriamo con addFilterBefore), non due volte.
+     */
+    @Bean
+    public FilterRegistrationBean<JwtAuthenticationFilter> registrazioneFiltroJwt(
+            JwtAuthenticationFilter filtro) {
+        FilterRegistrationBean<JwtAuthenticationFilter> registrazione =
+                new FilterRegistrationBean<>(filtro);
+        registrazione.setEnabled(false);
+        return registrazione;
     }
 
     /**

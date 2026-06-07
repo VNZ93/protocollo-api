@@ -18,6 +18,9 @@ public record DocumentoResponse(
         StatoDocumento stato,
         String numeroProtocollo,
         String proprietario,
+        String pdfRiferimento,
+        boolean indicizzato,
+        Instant dataIndicizzazione,
         Instant dataCreazione,
         Instant dataAggiornamento) {
 
@@ -30,6 +33,9 @@ public record DocumentoResponse(
                 documento.getStato(),
                 documento.getNumeroProtocollo(),
                 documento.getProprietario(),
+                documento.getPdfRiferimento(),
+                documento.isIndicizzato(),
+                documento.getDataIndicizzazione(),
                 documento.getDataCreazione(),
                 documento.getDataAggiornamento());
     }

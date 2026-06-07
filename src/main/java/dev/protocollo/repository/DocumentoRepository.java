@@ -5,18 +5,21 @@ import dev.protocollo.domain.StatoDocumento;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 /**
  * Repository Spring Data per l'entita {@link Documento}.
  *
- * Mostra tre modi di interrogare il DB con Hibernate/JPA:
+ * Mostra diversi modi di interrogare il DB con Hibernate/JPA:
  *  - metodi CRUD ereditati da {@link JpaRepository};
  *  - query derivate dal nome del metodo (countByProprietario);
- *  - query JPQL esplicita con {@link Query}.
+ *  - query JPQL esplicita con {@link Query};
+ *  - query dinamiche con {@link JpaSpecificationExecutor} (filtri combinabili).
  */
-public interface DocumentoRepository extends JpaRepository<Documento, Long> {
+public interface DocumentoRepository
+        extends JpaRepository<Documento, Long>, JpaSpecificationExecutor<Documento> {
 
     /**
      * Conta quanti documenti appartengono a un dato proprietario.

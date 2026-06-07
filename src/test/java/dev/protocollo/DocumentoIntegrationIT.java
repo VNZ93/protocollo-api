@@ -3,7 +3,8 @@ package dev.protocollo;
 import dev.protocollo.web.dto.DocumentoRequest;
 import dev.protocollo.web.dto.DocumentoResponse;
 import dev.protocollo.web.dto.LoginRequest;
-import dev.protocollo.web.dto.LoginResponse;
+import dev.protocollo.web.dto.RefreshRequest;
+import dev.protocollo.web.dto.TokenResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,7 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Test di integrazione "end-to-end" che esercita l'intero stack:
- * controller, sicurezza JWT, service, repository Hibernate, Flyway, Kafka.
+ * controller, sicurezza JWT, refresh token, service, repository Hibernate,
+ * Flyway, generazione PDF su storage locale (profilo dev) e Kafka.
  *
  * Avvia PostgreSQL e Kafka reali tramite Testcontainers (serve Docker attivo).
  * Le annotazioni {@code @ServiceConnection} collegano automaticamente i
@@ -50,16 +52,20 @@ class DocumentoIntegrationIT {
     @Autowired
     private TestRestTemplate restTemplate;
 
-    /** Effettua il login e restituisce gli header con il token Bearer. */
-    private HttpHeaders headerAutenticati(String username, String password) {
-        ResponseEntity<LoginResponse> login = restTemplate.postForEntity(
-                "/api/auth/login", new LoginRequest(username, password), LoginResponse.class);
+    /** Effettua il login e restituisce la coppia di token. */
+    private TokenResponse login(String username, String password) {
+        ResponseEntity<TokenResponse> risposta = restTemplate.postForEntity(
+                "/api/auth/login", new LoginRequest(username, password), TokenResponse.class);
 
-        assertThat(login.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(login.getBody()).isNotNull();
+        assertThat(risposta.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(risposta.getBody()).isNotNull();
+        return risposta.getBody();
+    }
 
+    /** Header con l'access token in formato Bearer. */
+    private HttpHeaders headerConToken(String accessToken) {
         HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(login.getBody().token());
+        headers.setBearerAuth(accessToken);
         return headers;
     }
 
@@ -70,8 +76,8 @@ class DocumentoIntegrationIT {
     }
 
     @Test
-    void flussoCompletoLoginCreazioneEAggiornamento() {
-        HttpHeaders headers = headerAutenticati("mrossi", "password123");
+    void flussoCompletoLoginCreazioneAggiornamentoEDownloadPdf() {
+        HttpHeaders headers = headerConToken(login("mrossi", "password123").accessToken());
 
         // --- Creazione (POST) ---
         DocumentoRequest creazione = new DocumentoRequest("Documento di test", "Contenuto iniziale");
@@ -83,6 +89,7 @@ class DocumentoIntegrationIT {
         assertThat(creato.getBody()).isNotNull();
         assertThat(creato.getBody().proprietario()).isEqualTo("mrossi");
         assertThat(creato.getBody().numeroProtocollo()).startsWith("PRT-");
+        assertThat(creato.getBody().pdfRiferimento()).isNotBlank();
         Long idCreato = creato.getBody().id();
 
         // --- Aggiornamento (PUT) ---
@@ -95,13 +102,34 @@ class DocumentoIntegrationIT {
         assertThat(aggiornato.getBody()).isNotNull();
         assertThat(aggiornato.getBody().titolo()).isEqualTo("Titolo aggiornato");
 
-        // --- Lettura del dettaglio (GET) ---
-        ResponseEntity<DocumentoResponse> letto = restTemplate.exchange(
-                "/api/documenti/" + idCreato, HttpMethod.GET,
-                new HttpEntity<>(headers), DocumentoResponse.class);
+        // --- Download del PDF (GET) ---
+        ResponseEntity<byte[]> pdf = restTemplate.exchange(
+                "/api/documenti/" + idCreato + "/pdf", HttpMethod.GET,
+                new HttpEntity<>(headers), byte[].class);
 
-        assertThat(letto.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(letto.getBody()).isNotNull();
-        assertThat(letto.getBody().titolo()).isEqualTo("Titolo aggiornato");
+        assertThat(pdf.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(pdf.getBody()).isNotEmpty();
+        // I file PDF iniziano con la firma "%PDF"
+        assertThat(new String(pdf.getBody(), 0, 4)).isEqualTo("%PDF");
+    }
+
+    @Test
+    void ilRefreshTokenRilasciaUnNuovoAccessToken() {
+        TokenResponse iniziale = login("admin", "admin123");
+
+        ResponseEntity<TokenResponse> refresh = restTemplate.postForEntity(
+                "/api/auth/refresh", new RefreshRequest(iniziale.refreshToken()), TokenResponse.class);
+
+        assertThat(refresh.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(refresh.getBody()).isNotNull();
+        assertThat(refresh.getBody().accessToken()).isNotBlank();
+        // La rotazione emette un refresh token diverso dal precedente
+        assertThat(refresh.getBody().refreshToken()).isNotEqualTo(iniziale.refreshToken());
+
+        // Il nuovo access token permette di accedere a una risorsa protetta
+        ResponseEntity<String> lista = restTemplate.exchange(
+                "/api/documenti", HttpMethod.GET,
+                new HttpEntity<>(headerConToken(refresh.getBody().accessToken())), String.class);
+        assertThat(lista.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 }

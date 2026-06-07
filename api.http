@@ -1,6 +1,6 @@
 ### File di richieste HTTP di esempio.
 ### Funziona con il REST Client di VS Code o con l'HTTP Client di IntelliJ IDEA.
-### Esegui prima il login: il token viene salvato nella variabile {{token}}.
+### Esegui prima il login: i token vengono salvati nelle variabili sotto.
 
 @host = http://localhost:8080
 
@@ -14,21 +14,26 @@ Content-Type: application/json
   "password": "admin123"
 }
 
-### Salvo il token restituito dal login
-@token = {{login.response.body.token}}
+### Salvo i token restituiti dal login
+@accessToken = {{login.response.body.accessToken}}
+@refreshToken = {{login.response.body.refreshToken}}
 
 ### 2) Elenco paginato dei documenti
-GET {{host}}/api/documenti?page=0&size=10
-Authorization: Bearer {{token}}
+GET {{host}}/api/documenti?page=0&size=10&sort=dataCreazione,desc
+Authorization: Bearer {{accessToken}}
 
-### 3) Dettaglio di un documento
+### 3) Elenco con filtri (stato + testo nel titolo)
+GET {{host}}/api/documenti?stato=PROTOCOLLATO&testo=determina
+Authorization: Bearer {{accessToken}}
+
+### 4) Dettaglio di un documento (servito dalla cache dopo la prima lettura)
 GET {{host}}/api/documenti/1
-Authorization: Bearer {{token}}
+Authorization: Bearer {{accessToken}}
 
-### 4) Creazione di un nuovo documento (genera un evento Kafka)
+### 5) Creazione di un nuovo documento (genera PDF + evento Kafka)
 # @name creazione
 POST {{host}}/api/documenti
-Authorization: Bearer {{token}}
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -36,11 +41,16 @@ Content-Type: application/json
   "contenuto": "Contenuto del documento creato via API."
 }
 
-### 5) Aggiornamento del documento appena creato
+### Salvo l'id del documento creato
 @idDocumento = {{creazione.response.body.id}}
 
+### 6) Download del PDF del documento
+GET {{host}}/api/documenti/{{idDocumento}}/pdf
+Authorization: Bearer {{accessToken}}
+
+### 7) Aggiornamento del documento appena creato
 PUT {{host}}/api/documenti/{{idDocumento}}
-Authorization: Bearer {{token}}
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
@@ -48,5 +58,21 @@ Content-Type: application/json
   "contenuto": "Contenuto modificato via API."
 }
 
-### 6) Richiesta senza token: deve restituire 401
+### 8) Refresh: nuova coppia di token a partire dal refresh token
+POST {{host}}/api/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### 9) Logout: revoca il refresh token
+POST {{host}}/api/auth/logout
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### 10) Richiesta senza token: deve restituire 401
 GET {{host}}/api/documenti

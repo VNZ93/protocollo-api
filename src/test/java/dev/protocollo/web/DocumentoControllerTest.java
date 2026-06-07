@@ -5,6 +5,8 @@ import dev.protocollo.domain.Documento;
 import dev.protocollo.domain.Ruolo;
 import dev.protocollo.domain.StatoDocumento;
 import dev.protocollo.domain.Utente;
+import dev.protocollo.security.CustomUserDetailsService;
+import dev.protocollo.security.JwtService;
 import dev.protocollo.security.UtenteAutenticato;
 import dev.protocollo.service.DocumentoService;
 import dev.protocollo.web.dto.DocumentoRequest;
@@ -46,6 +48,14 @@ class DocumentoControllerTest {
 
     @MockBean
     private DocumentoService documentoService;
+
+    // Il JwtAuthenticationFilter e un bean Filter incluso da @WebMvcTest:
+    // queste sue dipendenze vanno fornite (mockate) per far caricare il contesto.
+    @MockBean
+    private JwtService jwtService;
+
+    @MockBean
+    private CustomUserDetailsService userDetailsService;
 
     private UtenteAutenticato principal() {
         Utente utente = new Utente("mrossi", "hash", "Mario Rossi", Set.of(Ruolo.USER));

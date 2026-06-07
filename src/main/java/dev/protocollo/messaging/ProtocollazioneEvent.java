@@ -14,6 +14,7 @@ public record ProtocollazioneEvent(
         String titolo,
         String numeroProtocollo,
         String proprietario,
+        String pdfRiferimento,
         TipoOperazione operazione,
         Instant timestamp) {
 
@@ -27,8 +28,9 @@ public record ProtocollazioneEvent(
                                           Long idDocumento,
                                           String titolo,
                                           String numeroProtocollo,
-                                          String proprietario) {
+                                          String proprietario,
+                                          String pdfRiferimento) {
         return new ProtocollazioneEvent(idDocumento, titolo, numeroProtocollo,
-                proprietario, operazione, Instant.now());
+                proprietario, pdfRiferimento, operazione, Instant.now());
     }
 }

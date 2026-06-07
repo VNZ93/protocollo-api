@@ -53,6 +53,18 @@ public class Documento {
     @Column(nullable = false, length = 100)
     private String proprietario;
 
+    /** Riferimento (chiave) del PDF generato e salvato sull'object storage. */
+    @Column(name = "pdf_riferimento", length = 500)
+    private String pdfRiferimento;
+
+    /** Indica se la risorsa risulta allineata con l'indice esterno. */
+    @Column(nullable = false)
+    private boolean indicizzato = false;
+
+    /** Momento dell'ultimo allineamento ricevuto dall'indice esterno. */
+    @Column(name = "data_indicizzazione")
+    private Instant dataIndicizzazione;
+
     @Column(name = "data_creazione", nullable = false, updatable = false)
     private Instant dataCreazione;
 
@@ -143,6 +155,30 @@ public class Documento {
 
     public void setProprietario(String proprietario) {
         this.proprietario = proprietario;
+    }
+
+    public String getPdfRiferimento() {
+        return pdfRiferimento;
+    }
+
+    public void setPdfRiferimento(String pdfRiferimento) {
+        this.pdfRiferimento = pdfRiferimento;
+    }
+
+    public boolean isIndicizzato() {
+        return indicizzato;
+    }
+
+    public void setIndicizzato(boolean indicizzato) {
+        this.indicizzato = indicizzato;
+    }
+
+    public Instant getDataIndicizzazione() {
+        return dataIndicizzazione;
+    }
+
+    public void setDataIndicizzazione(Instant dataIndicizzazione) {
+        this.dataIndicizzazione = dataIndicizzazione;
     }
 
     public Instant getDataCreazione() {

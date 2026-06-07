@@ -1,0 +1,7 @@
+# Profilo "dev" (predefinito): storage dei PDF sul filesystem locale.
+app:
+  storage:
+    local:
+      # Cartella dove vengono salvati i PDF. Di default una sottocartella della
+      # directory temporanea di sistema, cosi non serve crearla a mano.
+      directory: ${STORAGE_LOCAL_DIR:${java.io.tmpdir}/protocollo-storage}
