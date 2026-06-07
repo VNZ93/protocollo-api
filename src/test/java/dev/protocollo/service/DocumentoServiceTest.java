@@ -1,25 +1,29 @@
 package dev.protocollo.service;
 
+import dev.protocollo.config.AccreditamentoProperties;
 import dev.protocollo.domain.Documento;
 import dev.protocollo.domain.Ruolo;
 import dev.protocollo.domain.StatoDocumento;
 import dev.protocollo.domain.Utente;
 import dev.protocollo.messaging.IndiceAggiornamentoEvent;
 import dev.protocollo.messaging.ProtocollazioneEvent;
-import dev.protocollo.messaging.ProtocollazioneProducer;
+import dev.protocollo.messaging.outbox.OutboxService;
+import dev.protocollo.pdf.DatiAccreditamento;
 import dev.protocollo.pdf.DocumentoPdfService;
 import dev.protocollo.repository.DocumentoRepository;
+import dev.protocollo.repository.UtenteRepository;
 import dev.protocollo.security.UtenteAutenticato;
 import dev.protocollo.storage.DocumentStorage;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -34,9 +38,10 @@ import static org.mockito.Mockito.when;
 /**
  * Test unitari della logica di business in {@link DocumentoService}.
  *
- * Le dipendenze (repository, producer Kafka, storage e generatore PDF) sono
- * sostituite da mock Mockito, cosi da testare solo le regole del service in
- * isolamento e senza database ne I/O reale.
+ * Le dipendenze (repository, outbox, storage e generatore PDF) sono sostituite
+ * da mock Mockito, cosi da testare solo le regole del service in isolamento e
+ * senza database ne I/O reale. Le proprieta di accreditamento sono un oggetto
+ * reale, costruito a mano.
  */
 @ExtendWith(MockitoExtension.class)
 class DocumentoServiceTest {
@@ -45,7 +50,10 @@ class DocumentoServiceTest {
     private DocumentoRepository documentoRepository;
 
     @Mock
-    private ProtocollazioneProducer protocollazioneProducer;
+    private UtenteRepository utenteRepository;
+
+    @Mock
+    private OutboxService outboxService;
 
     @Mock
     private DocumentStorage documentStorage;
@@ -53,8 +61,18 @@ class DocumentoServiceTest {
     @Mock
     private DocumentoPdfService pdfService;
 
-    @InjectMocks
     private DocumentoService documentoService;
+
+    @BeforeEach
+    void setUp() {
+        documentoService = new DocumentoService(
+                documentoRepository,
+                utenteRepository,
+                outboxService,
+                documentStorage,
+                pdfService,
+                new AccreditamentoProperties(List.of("Portale Servizi")));
+    }
 
     // --- Helper ---------------------------------------------------------------
 
@@ -72,14 +90,14 @@ class DocumentoServiceTest {
 
     /** Stub comuni a creazione e aggiornamento: generazione e salvataggio del PDF. */
     private void stubPdf() {
-        when(pdfService.genera(any(Documento.class))).thenReturn(new byte[]{1, 2, 3});
+        when(pdfService.genera(any(DatiAccreditamento.class))).thenReturn(new byte[]{1, 2, 3});
         when(documentStorage.salva(any(), any(), any())).thenReturn("documenti/test.pdf");
     }
 
     // --- Creazione ------------------------------------------------------------
 
     @Test
-    void laCreazioneAssegnaProtocolloGeneraPdfEPubblicaEvento() {
+    void laCreazioneAssegnaProtocolloGeneraPdfERegistraEventoNellOutbox() {
         stubPdf();
         // Il save simula il DB assegnando l'id all'entita e restituendola
         when(documentoRepository.save(any(Documento.class))).thenAnswer(invocazione -> {
@@ -97,10 +115,10 @@ class DocumentoServiceTest {
         assertThat(risultato.getNumeroProtocollo()).matches("PRT-\\d{4}-000042");
         assertThat(risultato.getPdfRiferimento()).isEqualTo("documenti/test.pdf");
 
-        // Verifico che sia stato pubblicato un evento di tipo CREAZIONE
+        // Verifico che sia stato registrato un evento di tipo CREAZIONE nell'outbox
         ArgumentCaptor<ProtocollazioneEvent> captor =
                 ArgumentCaptor.forClass(ProtocollazioneEvent.class);
-        verify(protocollazioneProducer).pubblica(captor.capture());
+        verify(outboxService).registraProtocollazione(captor.capture());
         assertThat(captor.getValue().operazione())
                 .isEqualTo(ProtocollazioneEvent.TipoOperazione.CREAZIONE);
     }
@@ -117,7 +135,7 @@ class DocumentoServiceTest {
                 1L, "Titolo aggiornato", "Nuovo contenuto", utente("mrossi", Ruolo.USER));
 
         assertThat(risultato.getTitolo()).isEqualTo("Titolo aggiornato");
-        verify(protocollazioneProducer).pubblica(any(ProtocollazioneEvent.class));
+        verify(outboxService).registraProtocollazione(any(ProtocollazioneEvent.class));
     }
 
     @Test
@@ -133,7 +151,7 @@ class DocumentoServiceTest {
     }
 
     @Test
-    void unUtenteNonProprietarioNonPuoAggiornareEnonPubblicaEventi() {
+    void unUtenteNonProprietarioNonPuoAggiornareEnonRegistraEventi() {
         when(documentoRepository.findById(1L))
                 .thenReturn(Optional.of(documentoEsistente(1L, "mrossi")));
 
@@ -141,7 +159,7 @@ class DocumentoServiceTest {
                 1L, "Tentativo", "Contenuto", utente("altro", Ruolo.USER)))
                 .isInstanceOf(AccessDeniedException.class);
 
-        verify(protocollazioneProducer, never()).pubblica(any());
+        verify(outboxService, never()).registraProtocollazione(any());
     }
 
     @Test

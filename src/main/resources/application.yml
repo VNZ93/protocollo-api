@@ -72,6 +72,18 @@ app:
     enabled: ${RATE_LIMIT_ENABLED:true}
     capacity: ${RATE_LIMIT_CAPACITY:100}
     refill-per-minute: ${RATE_LIMIT_REFILL:100}
+  # Intervallo (ms) con cui il publisher dell'outbox cerca eventi da inviare
+  outbox:
+    polling-delay: ${OUTBOX_POLLING_DELAY:5000}
+  # Servizi a cui l'utente risulta accreditato (finiscono nel PDF)
+  accreditamento:
+    servizi:
+      - Portale Servizi
+      - Portale Cloud
+      - API Gateway
+  # Microservizio esterno di anagrafica (ipotetico) chiamato via RestClient
+  servizio-anagrafica:
+    base-url: ${ANAGRAFICA_BASE_URL:http://localhost:9099}
 
 # --- Documentazione OpenAPI / Swagger ---
 springdoc:

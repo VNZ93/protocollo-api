@@ -74,5 +74,10 @@ Content-Type: application/json
   "refreshToken": "{{refreshToken}}"
 }
 
-### 10) Richiesta senza token: deve restituire 401
+### 10) Dati anagrafici da microservizio esterno (ipotetico)
+### Senza il servizio esterno reale risponde 502: e il comportamento atteso.
+GET {{host}}/api/anagrafica/mrossi
+Authorization: Bearer {{accessToken}}
+
+### 11) Richiesta senza token: deve restituire 401
 GET {{host}}/api/documenti

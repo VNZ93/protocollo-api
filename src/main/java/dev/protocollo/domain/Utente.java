@@ -40,6 +40,10 @@ public class Utente {
     @Column(name = "nome_completo", nullable = false, length = 150)
     private String nomeCompleto;
 
+    /** Email dell'utente, mostrata nel documento di accreditamento. */
+    @Column(length = 150)
+    private String email;
+
     /** Flag per disabilitare un utente senza cancellarlo. */
     @Column(nullable = false)
     private boolean attivo = true;
@@ -81,6 +85,14 @@ public class Utente {
 
     public String getNomeCompleto() {
         return nomeCompleto;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
     }
 
     public boolean isAttivo() {

@@ -11,6 +11,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.stream.Collectors;
@@ -65,6 +66,14 @@ public class GlobalExceptionHandler {
     public ProblemDetail gestisciTipoParametroErrato(MethodArgumentTypeMismatchException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
                 "Valore non valido per il parametro '" + ex.getName() + "'");
+    }
+
+    /** Errore nel chiamare un servizio esterno (es. anagrafica): 502 Bad Gateway. */
+    @ExceptionHandler(RestClientException.class)
+    public ProblemDetail gestisciServizioEsterno(RestClientException ex) {
+        log.warn("Chiamata a servizio esterno fallita: {}", ex.getMessage());
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY,
+                "Servizio esterno non raggiungibile");
     }
 
     /** Rete di sicurezza: qualsiasi errore non previsto diventa un 500. */

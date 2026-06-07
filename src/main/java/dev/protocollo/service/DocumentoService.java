@@ -1,15 +1,19 @@
 package dev.protocollo.service;
 
+import dev.protocollo.config.AccreditamentoProperties;
 import dev.protocollo.config.CacheConfig;
 import dev.protocollo.domain.Documento;
 import dev.protocollo.domain.StatoDocumento;
+import dev.protocollo.domain.Utente;
 import dev.protocollo.messaging.IndiceAggiornamentoEvent;
 import dev.protocollo.messaging.ProtocollazioneEvent;
-import dev.protocollo.messaging.ProtocollazioneProducer;
+import dev.protocollo.messaging.outbox.OutboxService;
+import dev.protocollo.pdf.DatiAccreditamento;
 import dev.protocollo.pdf.DocumentoPdfService;
 import dev.protocollo.repository.DocumentoRepository;
 import dev.protocollo.repository.DocumentoSpecifications;
 import dev.protocollo.repository.FiltroDocumenti;
+import dev.protocollo.repository.UtenteRepository;
 import dev.protocollo.security.UtenteAutenticato;
 import dev.protocollo.storage.DocumentStorage;
 import org.slf4j.Logger;
@@ -29,9 +33,9 @@ import java.time.Year;
  * Logica applicativa per la gestione dei documenti.
  *
  * Concentra qui le regole di business (assegnazione del numero di protocollo,
- * controllo dei permessi, generazione del PDF, pubblicazione degli eventi
- * Kafka) tenendole separate dal livello web (i controller) e da quello di
- * persistenza (i repository).
+ * controllo dei permessi, generazione del PDF di accreditamento, pubblicazione
+ * degli eventi tramite outbox) tenendole separate dal livello web (i controller)
+ * e da quello di persistenza (i repository).
  */
 @Service
 public class DocumentoService {
@@ -41,18 +45,24 @@ public class DocumentoService {
     private static final String CONTENT_TYPE_PDF = "application/pdf";
 
     private final DocumentoRepository documentoRepository;
-    private final ProtocollazioneProducer protocollazioneProducer;
+    private final UtenteRepository utenteRepository;
+    private final OutboxService outboxService;
     private final DocumentStorage documentStorage;
     private final DocumentoPdfService pdfService;
+    private final AccreditamentoProperties accreditamentoProperties;
 
     public DocumentoService(DocumentoRepository documentoRepository,
-                            ProtocollazioneProducer protocollazioneProducer,
+                            UtenteRepository utenteRepository,
+                            OutboxService outboxService,
                             DocumentStorage documentStorage,
-                            DocumentoPdfService pdfService) {
+                            DocumentoPdfService pdfService,
+                            AccreditamentoProperties accreditamentoProperties) {
         this.documentoRepository = documentoRepository;
-        this.protocollazioneProducer = protocollazioneProducer;
+        this.utenteRepository = utenteRepository;
+        this.outboxService = outboxService;
         this.documentStorage = documentStorage;
         this.pdfService = pdfService;
+        this.accreditamentoProperties = accreditamentoProperties;
     }
 
     /**
@@ -82,7 +92,8 @@ public class DocumentoService {
 
     /**
      * Crea un nuovo documento, gli assegna un numero di protocollo, genera il
-     * PDF e lo salva sullo storage, infine pubblica un evento su Kafka.
+     * PDF di accreditamento e lo salva sullo storage, infine registra l'evento
+     * di protocollazione nell'outbox.
      */
     @Transactional
     public Documento crea(String titolo, String contenuto, UtenteAutenticato utente) {
@@ -101,13 +112,13 @@ public class DocumentoService {
         log.info("Creato documento id={} numeroProtocollo={} da utente={}",
                 documento.getId(), documento.getNumeroProtocollo(), utente.getUsername());
 
-        pubblicaEvento(ProtocollazioneEvent.TipoOperazione.CREAZIONE, documento);
+        registraEvento(ProtocollazioneEvent.TipoOperazione.CREAZIONE, documento);
         return documento;
     }
 
     /**
      * Aggiorna titolo e contenuto di un documento esistente, rigenera il PDF e
-     * pubblica un evento di protocollazione. Invalida la cache del documento.
+     * registra un evento di protocollazione. Invalida la cache del documento.
      *
      * Solo il proprietario del documento o un amministratore possono modificarlo.
      *
@@ -129,7 +140,7 @@ public class DocumentoService {
 
         log.info("Aggiornato documento id={} da utente={}", id, utente.getUsername());
 
-        pubblicaEvento(ProtocollazioneEvent.TipoOperazione.AGGIORNAMENTO, documento);
+        registraEvento(ProtocollazioneEvent.TipoOperazione.AGGIORNAMENTO, documento);
         return documento;
     }
 
@@ -185,11 +196,27 @@ public class DocumentoService {
     }
 
     /**
-     * Genera il PDF del documento e lo salva sullo storage, restituendo il
+     * Genera il PDF del documento (con i dati del proprietario e i servizi di
+     * accreditamento configurati) e lo salva sullo storage, restituendo il
      * riferimento (chiave) con cui ritrovarlo.
      */
     private String generaESalvaPdf(Documento documento) {
-        byte[] pdf = pdfService.genera(documento);
+        // Recupero i dati del proprietario; se mancante uso lo username come fallback
+        Utente proprietario = utenteRepository.findByUsername(documento.getProprietario()).orElse(null);
+        String nomeCompleto = proprietario != null ? proprietario.getNomeCompleto() : documento.getProprietario();
+        String email = proprietario != null ? proprietario.getEmail() : null;
+
+        DatiAccreditamento dati = new DatiAccreditamento(
+                documento.getTitolo(),
+                documento.getNumeroProtocollo(),
+                nomeCompleto,
+                email,
+                documento.getProprietario(),
+                documento.getDataCreazione(),
+                documento.getContenuto(),
+                accreditamentoProperties.serviziSicuri());
+
+        byte[] pdf = pdfService.genera(dati);
         String chiave = "documenti/" + documento.getNumeroProtocollo() + ".pdf";
         return documentStorage.salva(chiave, pdf, CONTENT_TYPE_PDF);
     }
@@ -201,8 +228,12 @@ public class DocumentoService {
         return String.format("PRT-%d-%06d", Year.now().getValue(), id);
     }
 
-    private void pubblicaEvento(ProtocollazioneEvent.TipoOperazione tipo, Documento documento) {
-        protocollazioneProducer.pubblica(ProtocollazioneEvent.di(
+    /**
+     * Registra l'evento nell'outbox (stessa transazione del salvataggio): sara
+     * il publisher schedulato a inviarlo effettivamente su Kafka.
+     */
+    private void registraEvento(ProtocollazioneEvent.TipoOperazione tipo, Documento documento) {
+        outboxService.registraProtocollazione(ProtocollazioneEvent.di(
                 tipo,
                 documento.getId(),
                 documento.getTitolo(),

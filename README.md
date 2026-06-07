@@ -21,10 +21,12 @@ in un'applicazione Java moderna.
 | Autorizzazione   | Ruoli nel token, `@PreAuthorize` e `@AuthenticationPrincipal` per i permessi  |
 | Persistenza      | Hibernate / JPA su **PostgreSQL**, ricerche dinamiche con Specification        |
 | Migrazioni DB    | **Flyway** (schema versionato in SQL)                                         |
-| Messaggistica    | **Kafka**: producer (protocollazione) e **consumer** (aggiornamenti indice)   |
-| Generazione file | **PDF** del documento (OpenPDF) salvato su **object storage**                  |
+| Messaggistica    | **Kafka** con **pattern Outbox**: producer affidabile + **consumer** (indice) |
+| Generazione file | **PDF** da **template HTML** (Flying Saucer) salvato su **object storage**     |
 | Object storage   | Filesystem locale (profilo `dev`) o **S3/MinIO** (profilo `prod`)             |
+| Integrazione     | **RestClient** verso un microservizio esterno con mappatura JSON resiliente    |
 | Prestazioni      | **Cache** (Caffeine) sulle GET e **rate limiting** (token bucket) per IP       |
+| Pattern          | Documentati in [docs/PATTERNS.md](docs/PATTERNS.md)                            |
 | Documentazione   | **OpenAPI / Swagger UI**                                                      |
 | Osservabilita    | Logging con id di correlazione (MDC) + Spring Boot Actuator                   |
 | Test             | **JUnit 5**, **Mockito**, MockMvc e **Testcontainers** per l'integrazione     |
@@ -63,9 +65,11 @@ src/main/java/dev/protocollo
 ├── service/                          logica applicativa (documenti, refresh token)
 ├── repository/                       repository JPA, Specification e filtri
 ├── domain/                           entita JPA ed enum
-├── messaging/                        eventi, producer e consumer Kafka
-├── pdf/                              generazione del PDF (OpenPDF)
+├── messaging/                        eventi e consumer Kafka
+│   └── outbox/                       pattern Outbox (service + publisher)
+├── pdf/                              generazione del PDF da template HTML
 ├── storage/                          object storage: interfaccia + locale + S3
+├── client/                           client REST verso microservizi esterni
 └── common/
     ├── logging/                      filtro di logging con id di correlazione
     └── ratelimit/                    filtro di rate limiting (token bucket)
@@ -75,7 +79,10 @@ src/main/resources
 ├── application-dev.yml               profilo dev (storage locale)
 ├── application-prod.yml              profilo prod (storage S3/MinIO)
 ├── logback-spring.xml                formato dei log
-└── db/migration/                     migrazioni Flyway (V1..V4)
+├── templates/                        template HTML del PDF
+└── db/migration/                     migrazioni Flyway (V1..V6)
+
+docs/PATTERNS.md                      pattern e best practice usati nel progetto
 ```
 
 ---
@@ -179,6 +186,7 @@ Trovi tutte le chiamate pronte all'uso anche nel file [`api.http`](api.http).
 | GET    | `/api/documenti/{id}/pdf` | Scarica il PDF dallo storage         | autenticato           |
 | POST   | `/api/documenti`          | Crea + genera PDF + evento Kafka     | ruolo USER o ADMIN    |
 | PUT    | `/api/documenti/{id}`     | Aggiorna + rigenera PDF + evento     | proprietario o ADMIN  |
+| GET    | `/api/anagrafica/{user}`  | Dati anagrafici da microservizio esterno | autenticato       |
 
 L'elenco supporta paginazione, ordinamento e filtri facoltativi, ad esempio:
 `GET /api/documenti?stato=PROTOCOLLATO&proprietario=mrossi&testo=determina&page=0&size=10&sort=dataCreazione,desc`
@@ -221,10 +229,9 @@ interamente nel token.
 ## Eventi Kafka
 
 Alla creazione e all'aggiornamento di un documento viene pubblicato un evento sul
-topic `protocollo.documenti.protocollazione`. L'invio e **asincrono e non
-bloccante**: se il broker non e raggiungibile la richiesta HTTP va comunque a buon
-fine e l'errore viene solo registrato nei log (cosi l'esempio resta eseguibile
-anche senza Kafka).
+topic `protocollo.documenti.protocollazione`. La pubblicazione usa il **pattern
+Outbox** (vedi sotto): l'evento viene prima scritto su una tabella, nella stessa
+transazione del documento, e inviato a Kafka in un secondo momento.
 
 Esempio di messaggio (JSON):
 
@@ -258,14 +265,53 @@ Per provarlo, pubblica un messaggio sul topic (ad esempio dalla Kafka UI):
 Il deserializzatore e protetto da un `ErrorHandlingDeserializer`: un messaggio
 malformato viene scartato senza bloccare il consumo.
 
+### Pattern Outbox (pubblicazione affidabile)
+
+Pubblicare su Kafka direttamente dal service avrebbe un problema: se il commit sul
+DB e l'invio del messaggio non sono atomici, si rischia di salvare il documento ma
+perdere l'evento (o viceversa). Per evitarlo si usa il **Transactional Outbox**:
+
+1. il service scrive l'evento nella tabella `outbox_event` nella **stessa
+   transazione** del documento ([OutboxService](src/main/java/dev/protocollo/messaging/outbox/OutboxService.java));
+2. un publisher schedulato legge gli eventi non ancora inviati, li pubblica su
+   Kafka e li marca come pubblicati ([OutboxPublisher](src/main/java/dev/protocollo/messaging/outbox/OutboxPublisher.java)).
+
+La consegna e "at-least-once": un evento viene marcato pubblicato solo dopo
+l'invio confermato (i consumer devono quindi essere idempotenti).
+
+---
+
+## Integrazione con un microservizio esterno
+
+L'endpoint `GET /api/anagrafica/{username}` mostra come chiamare un altro
+microservizio (ipotetico) con `RestClient` e gestirne la risposta in modo
+**resiliente** ([AnagraficaClient](src/main/java/dev/protocollo/client/AnagraficaClient.java)).
+
+Invece di legarci a una classe che rispecchia esattamente il JSON remoto, leggiamo
+un `JsonNode` ed estraiamo i campi con `path()` e nomi alternativi (es. `nome`
+oppure `firstName`, `email` in radice o dentro `contatti`). Cosi, se il servizio
+esterno cambia o rinomina un campo, ci adattiamo in un solo punto senza rompere il
+resto dell'applicazione. Il risultato viene mappato sul nostro DTO stabile
+`DatiAnagrafici`.
+
+Essendo il servizio esterno solo ipotetico, senza un endpoint reale la chiamata
+risponde `502 Bad Gateway` (gestito centralmente): e il comportamento atteso.
+
 ---
 
 ## Generazione PDF e object storage (profili dev / prod)
 
-Alla creazione (e a ogni aggiornamento) di un documento viene generato un **PDF**
-con OpenPDF e salvato su un object storage tramite l'interfaccia `DocumentStorage`.
-Il riferimento al file viene memorizzato sul documento ed e scaricabile da
-`GET /api/documenti/{id}/pdf`.
+Alla creazione (e a ogni aggiornamento) di un documento viene generato un **PDF di
+accreditamento** e salvato su un object storage tramite l'interfaccia
+`DocumentStorage`. Il riferimento al file viene memorizzato sul documento ed e
+scaricabile da `GET /api/documenti/{id}/pdf`.
+
+Il PDF nasce da un **template HTML** ([documento-accreditamento.html](src/main/resources/templates/documento-accreditamento.html))
+con segnaposto `${...}` che vengono riempiti a runtime (Flying Saucer rende
+l'XHTML in PDF). Il documento mostra in modo dinamico nome e cognome dell'utente,
+email e la lista dei **servizi a cui e accreditato**, configurabili in
+`application.yml` (`app.accreditamento.servizi`). Tenere il layout in un template,
+fuori dal codice Java, permette di cambiarne la grafica senza ricompilare.
 
 L'implementazione dello storage cambia in base al **profilo Spring attivo**:
 
@@ -332,12 +378,24 @@ mvn verify
 
 ---
 
+## Pattern e best practice
+
+Il progetto usa diversi pattern di programmazione "classici" dove emergono in modo
+naturale: Strategy (storage intercambiabile), Adapter (`UtenteAutenticato`),
+Factory method, Template Method (i filtri), Repository, DTO, Specification e
+Transactional Outbox, oltre a Dependency Injection e Singleton dei bean Spring.
+
+Sono spiegati uno per uno, con riferimento ai file, in
+**[docs/PATTERNS.md](docs/PATTERNS.md)**.
+
+---
+
 ## Possibili estensioni
 
 Spunti per chi volesse ampliare l'esempio: rate limiting distribuito (es. Redis
 condiviso tra istanze), URL prefirmati per il download diretto dei PDF dallo
-storage, pattern outbox per la pubblicazione affidabile degli eventi Kafka,
-pipeline CI/CD e manifest Kubernetes.
+storage, dispatch generico dell'outbox su piu tipi di evento, pipeline CI/CD e
+manifest Kubernetes.
 
 ---
 

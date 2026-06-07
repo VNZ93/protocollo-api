@@ -38,13 +38,13 @@ public class DataSeeder implements CommandLineRunner {
     @Override
     public void run(String... args) {
         creaSeNonEsiste("admin", "admin123", "Amministratore di sistema",
-                Set.of(Ruolo.ADMIN, Ruolo.USER));
+                "admin@example.com", Set.of(Ruolo.ADMIN, Ruolo.USER));
         creaSeNonEsiste("mrossi", "password123", "Mario Rossi",
-                Set.of(Ruolo.USER));
+                "mario.rossi@example.com", Set.of(Ruolo.USER));
     }
 
     private void creaSeNonEsiste(String username, String passwordInChiaro,
-                                 String nomeCompleto, Set<Ruolo> ruoli) {
+                                 String nomeCompleto, String email, Set<Ruolo> ruoli) {
         if (utenteRepository.findByUsername(username).isPresent()) {
             return;
         }
@@ -53,6 +53,7 @@ public class DataSeeder implements CommandLineRunner {
                 passwordEncoder.encode(passwordInChiaro),
                 nomeCompleto,
                 ruoli);
+        utente.setEmail(email);
         utenteRepository.save(utente);
         log.info("Creato utente di esempio '{}' con ruoli {}", username, ruoli);
     }
