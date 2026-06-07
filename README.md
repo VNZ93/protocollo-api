@@ -36,25 +36,31 @@ in un'applicazione Java moderna.
 
 ## Architettura
 
-L'applicazione e organizzata a livelli, con responsabilita separate:
+L'applicazione e organizzata a livelli, con responsabilita separate. Il diagramma
+seguente (Mermaid, reso automaticamente da GitHub) mostra il flusso principale:
 
+```mermaid
+flowchart TD
+    Client[Client HTTP] --> Web[Web: controller, DTO, errori]
+    Web --> Service[Service: logica, permessi, PDF, eventi, cache]
+
+    Service --> Repo[Repository JPA]
+    Service --> Storage[Storage PDF]
+    Service --> Outbox[(Tabella outbox)]
+
+    Repo --> DB[(PostgreSQL)]
+    Storage --> FS[FS locale / S3-MinIO]
+
+    Outbox --> Publisher[Outbox publisher schedulato]
+    Publisher --> Kafka[(Kafka)]
+
+    KafkaIn[(Kafka: indice esterno)] --> Consumer[Consumer]
+    Consumer --> Service
 ```
-                      Kafka (indice esterno)
-                              |
-                              v
-                       messaging (consumer)
-                              |
-web (controller, DTO, errori) |
-        |                     |
-        v                     v
-service (logica, permessi, PDF, eventi, cache)
-        |                  |              |
-        v                  v              v
-repository (JPA)     storage (PDF)   messaging (producer)
-        |                  |              |
-        v                  v              v
-   PostgreSQL       FS locale / S3      Kafka
-```
+
+In sintesi: il `web` riceve le richieste e delega al `service`, che applica le
+regole di business e parla con `repository` (DB), `storage` (PDF) e con Kafka
+tramite l'outbox. Un consumer separato riceve gli aggiornamenti dall'indice esterno.
 
 ```
 src/main/java/dev/protocollo
@@ -84,6 +90,21 @@ src/main/resources
 
 docs/PATTERNS.md                      pattern e best practice usati nel progetto
 ```
+
+---
+
+## Documentazione
+
+Oltre a questo README, nella cartella [`docs/`](docs) trovi:
+
+- **[GUIDA-COMPLETA.md](docs/GUIDA-COMPLETA.md)**: compendio di studio che spiega il
+  progetto dall'inizio alla fine, classe per classe e metodo per metodo.
+- **[HLD.md](docs/HLD.md)**: progettazione ad alto livello (architettura, flussi,
+  requisiti) con diagrammi.
+- **[LLD.md](docs/LLD.md)**: progettazione di dettaglio (sequenze, schema DB,
+  contratti API, configurazione).
+- **[PATTERNS.md](docs/PATTERNS.md)**: pattern e best practice usati, con riferimenti
+  ai file.
 
 ---
 
