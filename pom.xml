@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        Eredito dal parent di Spring Boot: porta con se il "dependency management",
+        cioe la lista delle versioni gia allineate e testate delle dipendenze
+        (Spring, Hibernate, Jackson, Flyway, Testcontainers, ...).
+        In questo modo nei <dependency> sotto posso quasi sempre omettere la <version>.
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>dev.protocollo</groupId>
+    <artifactId>protocollo-api</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>protocollo-api</name>
+    <description>API di esempio per la protocollazione di documenti: Spring Boot, JWT, Kafka, JPA/Flyway</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <!-- Versioni delle dipendenze NON gestite dal parent di Spring Boot -->
+        <jjwt.version>0.12.6</jjwt.version>
+        <springdoc.version>2.6.0</springdoc.version>
+    </properties>
+
+    <dependencies>
+
+        <!-- ============================ WEB ============================ -->
+        <!-- Espone i controller REST, il server Tomcat embedded e Jackson per il JSON -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- Bean Validation (@NotBlank, @Size, ...) sui DTO di input -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- ======================== PERSISTENZA ======================= -->
+        <!-- Hibernate come implementazione JPA + Spring Data per i repository -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- Driver JDBC PostgreSQL (il DB usato in sviluppo e produzione) -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Flyway: versionamento ed esecuzione automatica delle migrazioni SQL -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <!-- Da Flyway 10 il supporto a PostgreSQL e in un modulo separato -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <!-- ========================= SICUREZZA ======================== -->
+        <!-- Spring Security: filter chain, autenticazione e autorizzazione -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!-- Libreria JJWT per creare e validare i token JWT (firma HMAC) -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>${jjwt.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ========================= MESSAGING ======================== -->
+        <!-- Spring for Apache Kafka: producer per gli eventi di protocollazione -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+
+        <!-- ====================== OSSERVABILITA ======================= -->
+        <!-- Actuator: health check, info e metriche (utile in Kubernetes/OpenShift) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Documentazione OpenAPI 3 + UI Swagger su /swagger-ui.html -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
+        </dependency>
+
+        <!-- =========================== TEST =========================== -->
+        <!-- JUnit 5, Mockito, AssertJ, Spring Test, MockMvc -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Utility di test per Spring Security (es. @WithMockUser, user(...)) -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Testcontainers: avvia PostgreSQL e Kafka reali (in Docker) nei test di integrazione.
+             Le versioni sono gestite dal parent di Spring Boot tramite il proprio BOM. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Crea il JAR eseguibile ("fat jar") e abilita "mvn spring-boot:run" -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                Surefire esegue gli unit test (*Test) durante la fase "test".
+                Sono veloci e NON richiedono Docker.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>**/*IT.java</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+            <!--
+                Failsafe esegue i test di integrazione (*IT) durante "mvn verify".
+                Questi usano Testcontainers e richiedono Docker attivo.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

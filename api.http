@@ -1,0 +1,52 @@
+### File di richieste HTTP di esempio.
+### Funziona con il REST Client di VS Code o con l'HTTP Client di IntelliJ IDEA.
+### Esegui prima il login: il token viene salvato nella variabile {{token}}.
+
+@host = http://localhost:8080
+
+### 1) Login (utente amministratore)
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin123"
+}
+
+### Salvo il token restituito dal login
+@token = {{login.response.body.token}}
+
+### 2) Elenco paginato dei documenti
+GET {{host}}/api/documenti?page=0&size=10
+Authorization: Bearer {{token}}
+
+### 3) Dettaglio di un documento
+GET {{host}}/api/documenti/1
+Authorization: Bearer {{token}}
+
+### 4) Creazione di un nuovo documento (genera un evento Kafka)
+# @name creazione
+POST {{host}}/api/documenti
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "titolo": "Nuova determina di esempio",
+  "contenuto": "Contenuto del documento creato via API."
+}
+
+### 5) Aggiornamento del documento appena creato
+@idDocumento = {{creazione.response.body.id}}
+
+PUT {{host}}/api/documenti/{{idDocumento}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "titolo": "Determina aggiornata",
+  "contenuto": "Contenuto modificato via API."
+}
+
+### 6) Richiesta senza token: deve restituire 401
+GET {{host}}/api/documenti

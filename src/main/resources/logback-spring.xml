@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Configurazione di logging.
+
+    Il pattern include %X{requestId}: e l'identificativo di correlazione messo
+    nell'MDC dal RequestLoggingFilter, che permette di seguire una singola
+    richiesta tra tutte le righe di log (ad esempio filtrando su Kibana).
+
+    In un ambiente reale (profilo "prod") conviene emettere log in JSON, cosi
+    che ELK/Kibana possano indicizzare i campi: si puo aggiungere la dipendenza
+    "logstash-logback-encoder" e un appender dedicato, attivato per profilo.
+-->
+<configuration>
+
+    <!-- Importa i colori e le impostazioni di default di Spring Boot -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] [reqId=%X{requestId:-}] %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</configuration>

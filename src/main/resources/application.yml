@@ -1,0 +1,72 @@
+spring:
+  application:
+    name: protocollo-api
+
+  # --- Database (PostgreSQL) ---
+  # I valori si possono sovrascrivere con variabili d'ambiente (utile in Docker/Kubernetes).
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/protocollo}
+    username: ${DB_USERNAME:protocollo}
+    password: ${DB_PASSWORD:protocollo}
+
+  # --- JPA / Hibernate ---
+  jpa:
+    hibernate:
+      # Lo schema e gestito da Flyway: Hibernate si limita a VALIDARE che le
+      # entita corrispondano alle tabelle, senza modificarle.
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        # Lavorare in UTC rende deterministico il mapping dei campi temporali
+        jdbc:
+          time_zone: UTC
+        format_sql: true
+    show-sql: false
+
+  # --- Flyway (migrazioni del database) ---
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  # --- Kafka ---
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Serializza il valore del messaggio in JSON
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        # Non aggiungiamo header con il tipo Java: i consumer possono essere scritti in altri linguaggi
+        spring.json.add.type.headers: false
+
+# --- Proprieta applicative personalizzate ---
+app:
+  jwt:
+    # IMPORTANTE: in produzione la chiave va passata come segreto, mai versionata.
+    # Deve essere lunga almeno 32 caratteri (256 bit) per l'algoritmo HMAC-SHA256.
+    secret: ${JWT_SECRET:chiave-segreta-di-sviluppo-da-cambiare-in-produzione-1234567890}
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
+  kafka:
+    topic-protocollazione: ${KAFKA_TOPIC:protocollo.documenti.protocollazione}
+
+# --- Documentazione OpenAPI / Swagger ---
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+# --- Actuator (osservabilita) ---
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+# --- Logging ---
+logging:
+  level:
+    root: INFO
+    dev.protocollo: DEBUG
