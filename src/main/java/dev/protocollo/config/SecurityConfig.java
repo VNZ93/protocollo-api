@@ -1,6 +1,7 @@
 package dev.protocollo.config;
 
 import dev.protocollo.security.JwtAuthenticationFilter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,6 +17,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * Configurazione centrale di Spring Security.
@@ -42,6 +49,10 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
+    /** Origin abilitate a chiamare l'API in cross-origin (es. la SPA frontend). */
+    @Value("${app.cors.allowed-origins}")
+    private String originConsentiteRaw;
+
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
     }
@@ -51,6 +62,8 @@ public class SecurityConfig {
         http
                 // CSRF non serve: l'API e stateless e non usa cookie di sessione
                 .csrf(AbstractHttpConfigurer::disable)
+                // Consente le chiamate cross-origin dal frontend (vedi corsConfigurationSource)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 // Nessuna sessione HTTP: ogni richiesta porta con se il proprio token
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // Regole di autorizzazione sulle rotte
@@ -63,6 +76,27 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    /**
+     * Configurazione CORS: solo le origin elencate in {@code app.cors.allowed-origins}
+     * (default la SPA frontend in sviluppo, {@code http://localhost:5173}) possono
+     * chiamare l'API da browser, con l'header {@code Authorization} necessario per il JWT.
+     */
+    private CorsConfigurationSource corsConfigurationSource() {
+        List<String> originConsentite = Arrays.stream(originConsentiteRaw.split(","))
+                .map(String::trim)
+                .filter(origine -> !origine.isEmpty())
+                .toList();
+
+        CorsConfiguration configurazione = new CorsConfiguration();
+        configurazione.setAllowedOrigins(originConsentite);
+        configurazione.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configurazione.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configurazione);
+        return source;
     }
 
     /**

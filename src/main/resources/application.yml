@@ -84,6 +84,9 @@ app:
   # Microservizio esterno di profilo (ipotetico) chiamato via RestClient
   servizio-profilo:
     base-url: ${PROFILO_BASE_URL:http://localhost:9099}
+  # Origin consentite per le richieste CORS (es. la SPA frontend in sviluppo)
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
 
 # --- Documentazione OpenAPI / Swagger ---
 springdoc:
