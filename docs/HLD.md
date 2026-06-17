@@ -234,6 +234,10 @@ non una foreign key: i documenti restano validi anche se l'utenza cambia.
 - **Produzione**: profilo `prod` (storage su S3/MinIO). Immagine Docker
   multi-stage, configurazione via variabili d'ambiente. Adatta a Kubernetes/
   OpenShift grazie agli endpoint di health.
+- **CI**: una pipeline GitHub Actions esegue build e test (unitari +
+  integrazione) ad ogni push/PR su `main`. Per l'installazione degli
+  strumenti, l'avvio passo-passo e i dettagli della pipeline vedi
+  [SETUP.md](SETUP.md).
 
 ## 12. Scelte architetturali e trade-off
 

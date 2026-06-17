@@ -5,7 +5,8 @@
 > Pensato per poterlo presentare a un colloquio senza esitazioni.
 
 Per la visione d'insieme vedi [HLD.md](HLD.md) e [LLD.md](LLD.md); per i pattern
-[PATTERNS.md](PATTERNS.md).
+[PATTERNS.md](PATTERNS.md); per installare l'ambiente da zero e per la pipeline
+CI [SETUP.md](SETUP.md).
 
 ## Come usare questa guida
 
@@ -325,7 +326,9 @@ migrazione. I tipi SQL sono scelti per combaciare con quanto si aspetta Hibernat
 - **Dockerfile** (multi-stage):
   - *Stage build* (`maven:3.9-eclipse-temurin-21`): copia prima il solo `pom.xml` e
     fa `dependency:go-offline` (cosi il layer delle dipendenze resta in cache se il
-    pom non cambia), poi copia `src` e fa `package -DskipTests`.
+    pom non cambia), poi copia `src` e fa `package -DskipTests`. I test non sono
+    saltati "per pigrizia": girano nella pipeline CI (vedi [SETUP.md](SETUP.md)),
+    cosi l'immagine non li ripete a ogni build e resta piu rapida da costruire.
   - *Stage runtime* (`eclipse-temurin:21-jre`): immagine leggera con la sola JRE,
     esegue il JAR come **utente non privilegiato** (buona pratica di sicurezza).
 - **docker-compose.yml**: avvia PostgreSQL, Kafka (modalita KRaft, senza ZooKeeper),
@@ -1910,22 +1913,12 @@ creare solo l'implementazione del profilo attivo.
 
 # Appendice I - Esecuzione, build e troubleshooting
 
-### Avvio in locale
-1. `docker compose up -d` (PostgreSQL, Kafka, Kafka UI, MinIO).
-2. `mvn spring-boot:run` (app su http://localhost:8080, profilo `dev`).
-3. Login con `admin/admin123` o `mrossi/password123`.
-4. Swagger: http://localhost:8080/swagger-ui.html.
-
-### Tutto in Docker
-`docker compose --profile app up -d --build`: avvia anche l'app in profilo `prod`
-(storage su MinIO). Console MinIO: http://localhost:9001 (`minioadmin/minioadmin`).
-
-### Comandi Maven utili
-- `mvn test`: unit test (veloci, senza Docker).
-- `mvn verify`: unit + integrazione (Testcontainers, serve Docker).
-- `mvn spring-boot:run`: avvia l'app.
-- `mvn clean package`: costruisce il JAR (`target/protocollo-api-*.jar`).
-- `java -jar target/protocollo-api-*.jar`: esegue il JAR.
+> Avvio rapido, comandi Maven e installazione degli strumenti da zero sono
+> documentati una sola volta per evitare versioni disallineate: vedi
+> [Avvio rapido nel README](../README.md#avvio-rapido) per i comandi e
+> [SETUP.md](SETUP.md) per l'installazione di JDK/Maven/Docker, il Maven
+> Wrapper e la pipeline CI. Qui sotto restano solo i problemi **applicativi**
+> (errori a runtime, non di ambiente) che si incontrano usando l'API.
 
 ### Troubleshooting / FAQ operative
 - **L'app non parte: errore di validazione schema (Hibernate).** Le entita non

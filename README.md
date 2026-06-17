@@ -8,6 +8,7 @@ in un'applicazione Java moderna.
 ![Java](https://img.shields.io/badge/Java-21-orange)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3-brightgreen)
 ![Build](https://img.shields.io/badge/build-Maven-blue)
+[![CI](https://github.com/VNZ93/protocollo-api/actions/workflows/ci.yml/badge.svg)](https://github.com/VNZ93/protocollo-api/actions/workflows/ci.yml)
 
 ---
 
@@ -95,16 +96,22 @@ docs/PATTERNS.md                      pattern e best practice usati nel progetto
 
 ## Documentazione
 
-Oltre a questo README, nella cartella [`docs/`](docs) trovi:
+Oltre a questo README, nella cartella [`docs/`](docs) trovi (nell'ordine in
+cui ha senso leggerli, dal "far partire il progetto" allo "studiarlo a fondo"):
 
-- **[GUIDA-COMPLETA.md](docs/GUIDA-COMPLETA.md)**: compendio di studio che spiega il
-  progetto dall'inizio alla fine, classe per classe e metodo per metodo.
-- **[HLD.md](docs/HLD.md)**: progettazione ad alto livello (architettura, flussi,
-  requisiti) con diagrammi.
-- **[LLD.md](docs/LLD.md)**: progettazione di dettaglio (sequenze, schema DB,
-  contratti API, configurazione).
-- **[PATTERNS.md](docs/PATTERNS.md)**: pattern e best practice usati, con riferimenti
-  ai file.
+1. **[SETUP.md](docs/SETUP.md)**: ambiente da zero (installazione JDK/Maven/
+   Docker, Maven Wrapper), avvio, verifica end-to-end e pipeline CI su
+   GitHub Actions. Parti da qui se devi clonare ed eseguire il progetto su
+   una macchina nuova.
+2. **[HLD.md](docs/HLD.md)**: progettazione ad alto livello (architettura, flussi,
+   requisiti) con diagrammi.
+3. **[LLD.md](docs/LLD.md)**: progettazione di dettaglio (sequenze, schema DB,
+   contratti API, configurazione).
+4. **[PATTERNS.md](docs/PATTERNS.md)**: pattern e best practice usati, con riferimenti
+   ai file.
+5. **[GUIDA-COMPLETA.md](docs/GUIDA-COMPLETA.md)**: compendio di studio che spiega il
+   progetto dall'inizio alla fine, classe per classe e metodo per metodo
+   (include anche FAQ ed esecuzione/troubleshooting a livello applicativo).
 
 ---
 
@@ -112,8 +119,14 @@ Oltre a questo README, nella cartella [`docs/`](docs) trovi:
 
 ### Prerequisiti
 - JDK 21
-- Maven 3.9+
+- Maven 3.9+ (oppure nessuno: usa il **Maven Wrapper** incluso — `./mvnw` su
+  Linux/macOS, `mvnw.cmd` su Windows — che scarica Maven da solo al primo
+  utilizzo; vedi [docs/SETUP.md](docs/SETUP.md))
 - Docker (per l'infrastruttura locale e per i test di integrazione)
+
+> Se parti da una macchina senza nessuno di questi strumenti installato,
+> [docs/SETUP.md](docs/SETUP.md) descrive passo per passo come installarli
+> (anche su Windows con winget) e come e stata creata la pipeline CI.
 
 ### 1. Avvia l'infrastruttura (PostgreSQL + Kafka)
 
@@ -129,6 +142,9 @@ console su http://localhost:9001 (utente/password: `minioadmin`).
 
 ```bash
 mvn spring-boot:run
+# oppure, senza Maven installato globalmente:
+./mvnw spring-boot:run        # Linux/macOS
+mvnw.cmd spring-boot:run      # Windows
 ```
 
 L'applicazione parte su http://localhost:8080. All'avvio:
@@ -382,6 +398,11 @@ mvn verify
 - **Test di integrazione** (`*IT`): `DocumentoIntegrationIT` avvia PostgreSQL e
   Kafka reali con Testcontainers ed esercita l'intero flusso: login, creazione
   (con generazione PDF), aggiornamento, download del PDF e refresh del token.
+
+Ad ogni push/PR su `main` una pipeline **GitHub Actions** esegue `mvn verify`
+(quindi entrambe le categorie di test): vedi
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) e i dettagli in
+[docs/SETUP.md](docs/SETUP.md#4-pipeline-ci-github-actions).
 
 ---
 

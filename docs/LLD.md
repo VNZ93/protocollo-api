@@ -290,6 +290,9 @@ Chiavi principali (`application.yml` + profili):
   validazione JWT, livello web con MockMvc. Nessun Docker.
 - **Integrazione** (`*IT`, Failsafe, fase `verify`): Testcontainers avvia
   PostgreSQL e Kafka reali, esercita il flusso completo end-to-end.
+- Entrambe le categorie girano automaticamente in CI (GitHub Actions) ad ogni
+  push/PR su `main`: vedi [SETUP.md](SETUP.md) per il workflow e per come
+  riprodurlo in locale partendo da una macchina senza nulla installato.
 
 ## 11. Rate limiting (algoritmo)
 
