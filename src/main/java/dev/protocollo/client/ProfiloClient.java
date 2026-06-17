@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Client verso un microservizio esterno di anagrafica (ipotetico).
+ * Client verso un microservizio esterno di profilo (ipotetico).
  *
  * Il punto interessante e la mappatura "difensiva" del JSON: invece di legarci
  * a una classe che rispecchia esattamente la risposta remota, leggiamo un
@@ -21,27 +21,27 @@ import java.util.Optional;
  * in un solo punto e ci adattiamo, senza rompere tutto il resto dell'applicazione.
  */
 @Component
-public class AnagraficaClient {
+public class ProfiloClient {
 
-    private static final Logger log = LoggerFactory.getLogger(AnagraficaClient.class);
+    private static final Logger log = LoggerFactory.getLogger(ProfiloClient.class);
 
     private final RestClient restClient;
 
-    public AnagraficaClient(RestClient anagraficaRestClient) {
-        this.restClient = anagraficaRestClient;
+    public ProfiloClient(RestClient profiloRestClient) {
+        this.restClient = profiloRestClient;
     }
 
     /**
-     * Recupera i dati anagrafici di un utente dal servizio esterno.
+     * Recupera i dati di profilo di un utente dal servizio esterno.
      *
      * @return i dati mappati, oppure {@code Optional.empty()} se l'utente non
      *         esiste (404). Gli altri errori di rete vengono propagati e
      *         tradotti in 502 dal GlobalExceptionHandler.
      */
-    public Optional<DatiAnagrafici> recuperaPerUsername(String username) {
+    public Optional<DatiProfilo> recuperaPerUsername(String username) {
         try {
             JsonNode root = restClient.get()
-                    .uri("/anagrafica/{username}", username)
+                    .uri("/profilo/{username}", username)
                     .retrieve()
                     .body(JsonNode.class);
 
@@ -50,7 +50,7 @@ public class AnagraficaClient {
             }
             return Optional.of(mappa(username, root));
         } catch (HttpClientErrorException.NotFound e) {
-            log.info("Anagrafica esterna: utente '{}' non trovato", username);
+            log.info("Profilo esterno: utente '{}' non trovato", username);
             return Optional.empty();
         }
     }
@@ -60,7 +60,7 @@ public class AnagraficaClient {
      * e strutture annidate. Nessun accesso diretto che possa lanciare NPE:
      * {@code path()} restituisce un nodo "mancante" invece di null.
      */
-    private DatiAnagrafici mappa(String username, JsonNode node) {
+    private DatiProfilo mappa(String username, JsonNode node) {
         // Il nome completo puo arrivare gia pronto, oppure come nome + cognome
         // con diverse possibili etichette (italiano/inglese).
         String nomeCompleto = primoNonVuoto(
@@ -83,7 +83,7 @@ public class AnagraficaClient {
         // I gruppi possono chiamarsi in modi diversi ed essere assenti.
         List<String> gruppi = leggiArray(node, "gruppi", "groups", "ruoli");
 
-        return new DatiAnagrafici(username, nomeCompleto, email, telefono, gruppi);
+        return new DatiProfilo(username, nomeCompleto, email, telefono, gruppi);
     }
 
     /** Restituisce il primo valore non vuoto tra quelli passati ("" se nessuno). */

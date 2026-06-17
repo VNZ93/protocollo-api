@@ -28,13 +28,13 @@ flowchart LR
     API -->|eventi| Kafka[(Apache Kafka)]
     Indice[Indice esterno] -->|eventi| Kafka
     Kafka -->|aggiornamenti| API
-    API -->|REST| MS[Microservizio anagrafica]
+    API -->|REST| MS[Microservizio profilo]
 ```
 
 **Attori:**
 - **Utente** (ruolo USER o ADMIN): consuma le API REST autenticandosi con JWT.
 - **Indice esterno**: sistema che pubblica aggiornamenti su Kafka, consumati dall'API.
-- **Microservizio anagrafica**: servizio terzo interrogato via REST per dati utente.
+- **Microservizio profilo**: servizio terzo interrogato via REST per dati utente.
 
 ---
 
@@ -50,7 +50,7 @@ flowchart LR
 | RF-06  | Aggiornamento di un documento (solo proprietario o amministratore) |
 | RF-07  | Pubblicazione di un evento a ogni creazione/aggiornamento |
 | RF-08  | Allineamento dei documenti agli aggiornamenti dell'indice esterno |
-| RF-09  | Recupero dati anagrafici da un microservizio esterno |
+| RF-09  | Recupero dati di profilo da un microservizio esterno |
 
 ## 4. Requisiti non funzionali
 

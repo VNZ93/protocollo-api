@@ -96,7 +96,7 @@ evento perso, o viceversa).
 ### Anti-corruption layer (mappatura difensiva)
 Quando si integra un servizio esterno, si mappa la sua risposta su un nostro DTO
 stabile, isolando il resto dell'app dai cambiamenti del formato remoto.
-- Esempio: [AnagraficaClient](../src/main/java/dev/protocollo/client/AnagraficaClient.java) legge il JSON con `path()` e nomi di campo alternativi.
+- Esempio: [ProfiloClient](../src/main/java/dev/protocollo/client/ProfiloClient.java) legge il JSON con `path()` e nomi di campo alternativi.
 
 ---
 

@@ -223,7 +223,7 @@ Trovi tutte le chiamate pronte all'uso anche nel file [`api.http`](api.http).
 | GET    | `/api/documenti/{id}/pdf` | Scarica il PDF dallo storage         | autenticato           |
 | POST   | `/api/documenti`          | Crea + genera PDF + evento Kafka     | ruolo USER o ADMIN    |
 | PUT    | `/api/documenti/{id}`     | Aggiorna + rigenera PDF + evento     | proprietario o ADMIN  |
-| GET    | `/api/anagrafica/{user}`  | Dati anagrafici da microservizio esterno | autenticato       |
+| GET    | `/api/profilo/{user}`  | Dati di profilo da microservizio esterno | autenticato       |
 
 L'elenco supporta paginazione, ordinamento e filtri facoltativi, ad esempio:
 `GET /api/documenti?stato=PROTOCOLLATO&proprietario=mrossi&testo=determina&page=0&size=10&sort=dataCreazione,desc`
@@ -320,16 +320,16 @@ l'invio confermato (i consumer devono quindi essere idempotenti).
 
 ## Integrazione con un microservizio esterno
 
-L'endpoint `GET /api/anagrafica/{username}` mostra come chiamare un altro
+L'endpoint `GET /api/profilo/{username}` mostra come chiamare un altro
 microservizio (ipotetico) con `RestClient` e gestirne la risposta in modo
-**resiliente** ([AnagraficaClient](src/main/java/dev/protocollo/client/AnagraficaClient.java)).
+**resiliente** ([ProfiloClient](src/main/java/dev/protocollo/client/ProfiloClient.java)).
 
 Invece di legarci a una classe che rispecchia esattamente il JSON remoto, leggiamo
 un `JsonNode` ed estraiamo i campi con `path()` e nomi alternativi (es. `nome`
 oppure `firstName`, `email` in radice o dentro `contatti`). Cosi, se il servizio
 esterno cambia o rinomina un campo, ci adattiamo in un solo punto senza rompere il
 resto dell'applicazione. Il risultato viene mappato sul nostro DTO stabile
-`DatiAnagrafici`.
+`DatiProfilo`.
 
 Essendo il servizio esterno solo ipotetico, senza un endpoint reale la chiamata
 risponde `502 Bad Gateway` (gestito centralmente): e il comportamento atteso.

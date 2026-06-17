@@ -22,7 +22,7 @@ dev.protocollo
 │   └── outbox                   OutboxService, OutboxPublisher
 ├── pdf                          DocumentoPdfService, DatiAccreditamento
 ├── storage                      DocumentStorage + Local + S3 + config
-├── client                       AnagraficaClient, DatiAnagrafici
+├── client                       ProfiloClient, DatiProfilo
 └── common
     ├── logging                  RequestLoggingFilter
     └── ratelimit                RateLimitingFilter
@@ -37,7 +37,7 @@ dev.protocollo
   emissione JWT e gestione refresh token.
 - **DocumentoController**: CRUD documenti + download PDF. Riceve il principal con
   `@AuthenticationPrincipal`, applica `@PreAuthorize` per i ruoli.
-- **AnagraficaController**: `/api/anagrafica/{username}`, delega al client esterno.
+- **ProfiloController**: `/api/profilo/{username}`, delega al client esterno.
 - **GlobalExceptionHandler**: `@RestControllerAdvice`, mappa le eccezioni su
   `ProblemDetail` (RFC 7807).
 
@@ -66,7 +66,7 @@ dev.protocollo
 ### 2.6 PDF, Storage, Client
 - **DocumentoPdfService**: riempie un template XHTML e lo rende in PDF.
 - **DocumentStorage** (Strategy): `LocalFileSystemStorage` (dev) / `S3ObjectStorage` (prod).
-- **AnagraficaClient**: chiama il MS esterno via RestClient, mappa il JsonNode.
+- **ProfiloClient**: chiama il MS esterno via RestClient, mappa il JsonNode.
 
 ### 2.7 Common
 - **RequestLoggingFilter**: id di correlazione in MDC, log di metodo/URI/stato/durata.
@@ -130,21 +130,21 @@ sequenceDiagram
     end
 ```
 
-### 3.4 Anagrafica esterna (mappatura resiliente)
+### 3.4 Profilo esterno (mappatura resiliente)
 
 ```mermaid
 sequenceDiagram
     actor U as Client
-    participant C as AnagraficaController
-    participant AC as AnagraficaClient
+    participant C as ProfiloController
+    participant AC as ProfiloClient
     participant MS as MS esterno
-    U->>C: GET /api/anagrafica/{username}
+    U->>C: GET /api/profilo/{username}
     C->>AC: recuperaPerUsername(username)
-    AC->>MS: GET /anagrafica/{username}
+    AC->>MS: GET /profilo/{username}
     alt risposta 200
         MS-->>AC: JSON
         AC->>AC: mappa JsonNode (path + nomi alternativi)
-        AC-->>C: DatiAnagrafici
+        AC-->>C: DatiProfilo
         C-->>U: 200 + dati
     else 404
         AC-->>C: Optional.empty
@@ -228,7 +228,7 @@ l'header `Authorization: Bearer <accessToken>`.
 | GET | `/api/documenti/{id}/pdf` | - | PDF (binario) | 200, 401, 404 |
 | POST | `/api/documenti` | `{titolo, contenuto}` | documento creato | 201, 400, 401, 403 |
 | PUT | `/api/documenti/{id}` | `{titolo, contenuto}` | documento aggiornato | 200, 400, 401, 403, 404 |
-| GET | `/api/anagrafica/{username}` | - | dati anagrafici | 200, 401, 404, 502 |
+| GET | `/api/profilo/{username}` | - | dati di profilo | 200, 401, 404, 502 |
 
 ---
 
@@ -248,7 +248,7 @@ Chiavi principali (`application.yml` + profili):
 | `app.rate-limit.capacity` | gettoni massimi per IP | 100 |
 | `app.rate-limit.refill-per-minute` | ricarica gettoni/minuto | 100 |
 | `app.accreditamento.servizi` | servizi mostrati nel PDF | lista in yml |
-| `app.servizio-anagrafica.base-url` | URL MS esterno | http://localhost:9099 |
+| `app.servizio-profilo.base-url` | URL MS esterno | http://localhost:9099 |
 | `app.storage.local.directory` | cartella PDF (dev) | tmp |
 | `app.storage.s3.*` | endpoint/bucket/credenziali S3 (prod) | MinIO locale |
 

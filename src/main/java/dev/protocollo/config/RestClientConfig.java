@@ -7,16 +7,16 @@ import org.springframework.web.client.RestClient;
 
 /**
  * Configura il {@link RestClient} usato per chiamare il microservizio esterno
- * di anagrafica. L'URL di base e configurabile, cosi da puntare ad ambienti
+ * di profilo. L'URL di base e configurabile, cosi da puntare ad ambienti
  * diversi senza modificare il codice.
  */
 @Configuration
 public class RestClientConfig {
 
     @Bean
-    public RestClient anagraficaRestClient(
+    public RestClient profiloRestClient(
             RestClient.Builder builder,
-            @Value("${app.servizio-anagrafica.base-url}") String baseUrl) {
+            @Value("${app.servizio-profilo.base-url}") String baseUrl) {
         return builder.baseUrl(baseUrl).build();
     }
 }

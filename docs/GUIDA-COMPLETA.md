@@ -60,7 +60,7 @@ Questa parte spiega i concetti su cui poggia il progetto. Leggendola si capisce 
 Il progetto e un **backend**: un programma senza interfaccia grafica che espone
 delle funzioni via rete. Lo fa con un'**API REST**, cioe un insieme di URL
 (endpoint) che si invocano via HTTP. Le convenzioni REST principali:
-- si lavora su **risorse** (qui: documenti, anagrafica) identificate da un URL;
+- si lavora su **risorse** (qui: documenti, profilo) identificate da un URL;
 - il **metodo HTTP** indica l'azione: `GET` (leggi), `POST` (crea), `PUT`
   (aggiorna), `DELETE` (cancella);
 - lo **stato** della risposta e un codice numerico (200 ok, 201 creato, 400 input
@@ -291,7 +291,7 @@ durante lo sviluppo e riservare i test pesanti alla fase `verify`/CI.
 - `app.outbox.polling-delay`: intervallo del publisher dell'outbox.
 - `app.rate-limit.enabled/capacity/refill-per-minute`: parametri del rate limiter.
 - `app.accreditamento.servizi`: lista dei servizi mostrati nel PDF.
-- `app.servizio-anagrafica.base-url`: URL del MS esterno.
+- `app.servizio-profilo.base-url`: URL del MS esterno.
 - `management.endpoints.web.exposure.include`: espone `health,info,metrics`;
   `management.endpoint.health.show-details: always` mostra i dettagli di health.
 - `logging.level`: `root: INFO`, `dev.protocollo: DEBUG`.
@@ -781,8 +781,8 @@ public class CacheConfig {
 ### RestClientConfig
 **Cosa fa**: crea il `RestClient` per il MS esterno.
 ```java
-@Bean RestClient anagraficaRestClient(RestClient.Builder builder,
-        @Value("${app.servizio-anagrafica.base-url}") String baseUrl) {
+@Bean RestClient profiloRestClient(RestClient.Builder builder,
+        @Value("${app.servizio-profilo.base-url}") String baseUrl) {
     return builder.baseUrl(baseUrl).build();
 }
 ```
@@ -938,15 +938,15 @@ Altre operazioni:
 `GlobalExceptionHandler`. *Perche due livelli di autorizzazione?* `@PreAuthorize` filtra
 per ruolo (grana grossa); il service verifica il proprietario (grana fine).
 
-### AnagraficaController
+### ProfiloController
 ```java
 @GetMapping("/{username}")
-public DatiAnagrafici dettaglio(@PathVariable String username) {
-    return anagraficaClient.recuperaPerUsername(username)
-            .orElseThrow(() -> new RisorsaNonTrovataException("Anagrafica non trovata per " + username));
+public DatiProfilo dettaglio(@PathVariable String username) {
+    return profiloClient.recuperaPerUsername(username)
+            .orElseThrow(() -> new RisorsaNonTrovataException("Profilo non trovato per " + username));
 }
 ```
-- Delega al `AnagraficaClient`, che ritorna un `Optional`. Se vuoto (utente non
+- Delega al `ProfiloClient`, che ritorna un `Optional`. Se vuoto (utente non
   trovato) -> `RisorsaNonTrovataException` -> 404. Se il servizio esterno e
   irraggiungibile, il client lancia `RestClientException` -> 502 (gestito globalmente).
 - Controller volutamente sottile: tutta la logica di chiamata/mappatura sta nel client.
@@ -1292,18 +1292,18 @@ sia attiva: e il bello dello Strategy + DI.
 
 ## Client REST esterni
 
-### DatiAnagrafici (record)
+### DatiProfilo (record)
 ```java
-public record DatiAnagrafici(String username, String nomeCompleto, String email,
+public record DatiProfilo(String username, String nomeCompleto, String email,
         String telefono, List<String> gruppi) {}
 ```
 - DTO "pulito" restituito al nostro dominio, indipendente dal formato JSON remoto.
 - E il **contratto stabile** su cui si appoggia il resto dell'applicazione: anche se il
   servizio esterno cambia struttura, qui non cambia nulla (si adatta solo il client).
 
-### AnagraficaClient (in dettaglio)
+### ProfiloClient (in dettaglio)
 **Cosa fa**: chiama il MS esterno e ne mappa la risposta in modo resiliente.
-- `recuperaPerUsername(username)`: chiama `GET /anagrafica/{username}` con
+- `recuperaPerUsername(username)`: chiama `GET /profilo/{username}` con
   `RestClient`, ottiene un `JsonNode`. Se 404 -> `Optional.empty()`; altri errori di
   rete (`RestClientException`) propagano (poi 502).
 - `mappa(username, node)`: estrazione **difensiva**:
@@ -1413,9 +1413,9 @@ Qui i pezzi si ricuciono, seguendo una richiesta dall'inizio alla fine.
    valida; viene **ruotato** (vecchio revocato, nuovo emesso); `JwtService` genera
    un nuovo access token.
 
-### E) Anagrafica esterna
-1. `GET /api/anagrafica/{username}`. `AnagraficaClient` chiama il MS esterno, mappa
-   il `JsonNode` in `DatiAnagrafici`. Senza il servizio reale -> 502 (atteso).
+### E) Profilo esterno
+1. `GET /api/profilo/{username}`. `ProfiloClient` chiama il MS esterno, mappa
+   il `JsonNode` in `DatiProfilo`. Senza il servizio reale -> 502 (atteso).
 
 ---
 
@@ -1520,7 +1520,7 @@ letto, studiato e spiegato.
 ### Decisioni di dominio
 - Il **proprietario** del documento e memorizzato come username (stringa), non come
   foreign key verso `utente`: il documento resta valido e leggibile anche se
-  l'anagrafica utente cambia o viene riorganizzata. E una scelta consapevole
+  il profilo utente cambia o viene riorganizzata. E una scelta consapevole
   (accoppiamento debole), con il trade-off di non avere integrita referenziale su
   quel campo.
 - Il **numero di protocollo** ha formato `PRT-<anno>-<id a 6 cifre>`: semplice e
@@ -1622,7 +1622,7 @@ Riferimento rapido: ogni file sorgente con la sua responsabilita in una riga.
 |------|----------------|
 | `web/AuthController` | Login, refresh, logout. |
 | `web/DocumentoController` | CRUD documenti + download PDF. |
-| `web/AnagraficaController` | Dati anagrafici dal MS esterno. |
+| `web/ProfiloController` | Dati di profilo dal MS esterno. |
 | `web/GlobalExceptionHandler` | Mappa le eccezioni in risposte HTTP. |
 | `web/dto/*` | Record di richiesta/risposta. |
 
@@ -1649,8 +1649,8 @@ Riferimento rapido: ogni file sorgente con la sua responsabilita in una riga.
 | `storage/S3ObjectStorage` | Storage su S3/MinIO (prod). |
 | `storage/S3Config` | Bean `S3Client` (prod). |
 | `storage/StorageException` | Errore di storage. |
-| `client/AnagraficaClient` | Chiama il MS esterno, mappa il JSON. |
-| `client/DatiAnagrafici` | DTO anagrafica. |
+| `client/ProfiloClient` | Chiama il MS esterno, mappa il JSON. |
+| `client/DatiProfilo` | DTO profilo. |
 | `common/logging/RequestLoggingFilter` | Id di correlazione + log richieste. |
 | `common/ratelimit/RateLimitingFilter` | Rate limiting per IP. |
 
@@ -1761,7 +1761,7 @@ riferimento PDF). Errori: 400 (titolo vuoto/troppo lungo), 401, 403.
 Permessi: proprietario o ADMIN (verifica nel service). Stesso body della POST.
 Risposta 200: documento aggiornato. Errori: 400, 401, 403, 404.
 
-### GET /api/anagrafica/{username}
+### GET /api/profilo/{username}
 Risposta 200: `{ username, nomeCompleto, email, telefono, gruppi }`. Errori: 401,
 404 (non trovato), 502 (MS esterno irraggiungibile - atteso senza servizio reale).
 
@@ -1896,7 +1896,7 @@ passa dall'esterno e i segreti non si versionano.
 | `RATE_LIMIT_ENABLED` | `app.rate-limit.enabled` | true | |
 | `RATE_LIMIT_CAPACITY` | `app.rate-limit.capacity` | 100 | Gettoni max per IP. |
 | `RATE_LIMIT_REFILL` | `app.rate-limit.refill-per-minute` | 100 | Ricarica/minuto. |
-| `ANAGRAFICA_BASE_URL` | `app.servizio-anagrafica.base-url` | http://localhost:9099 | MS esterno. |
+| `PROFILO_BASE_URL` | `app.servizio-profilo.base-url` | http://localhost:9099 | MS esterno. |
 | `STORAGE_LOCAL_DIR` | `app.storage.local.directory` | tmp/protocollo-storage | Profilo dev. |
 | `S3_ENDPOINT` | `app.storage.s3.endpoint` | http://localhost:9000 | Profilo prod. |
 | `S3_REGION` | `app.storage.s3.region` | us-east-1 | Profilo prod. |
@@ -1934,7 +1934,7 @@ creare solo l'implementazione del profilo attivo.
   `RATE_LIMIT_CAPACITY`.
 - **L'evento non arriva su Kafka subito.** Normale: l'outbox lo invia col polling
   (default 5s). Controlla nella Kafka UI.
-- **502 su `/api/anagrafica/...`.** Atteso: il MS esterno e ipotetico e non esiste.
+- **502 su `/api/profilo/...`.** Atteso: il MS esterno e ipotetico e non esiste.
 - **Versione di OpenPDF/Flying Saucer non risolta.** Aggiorna la property nel pom.
 - **Il PDF non si scarica (404).** Il documento non ha un PDF associato
   (`pdfRiferimento` nullo) o la chiave non esiste sullo storage.

@@ -81,9 +81,9 @@ app:
       - Portale Servizi
       - Portale Cloud
       - API Gateway
-  # Microservizio esterno di anagrafica (ipotetico) chiamato via RestClient
-  servizio-anagrafica:
-    base-url: ${ANAGRAFICA_BASE_URL:http://localhost:9099}
+  # Microservizio esterno di profilo (ipotetico) chiamato via RestClient
+  servizio-profilo:
+    base-url: ${PROFILO_BASE_URL:http://localhost:9099}
 
 # --- Documentazione OpenAPI / Swagger ---
 springdoc:

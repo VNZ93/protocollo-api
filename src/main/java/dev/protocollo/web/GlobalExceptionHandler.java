@@ -68,7 +68,7 @@ public class GlobalExceptionHandler {
                 "Valore non valido per il parametro '" + ex.getName() + "'");
     }
 
-    /** Errore nel chiamare un servizio esterno (es. anagrafica): 502 Bad Gateway. */
+    /** Errore nel chiamare un servizio esterno (es. profilo): 502 Bad Gateway. */
     @ExceptionHandler(RestClientException.class)
     public ProblemDetail gestisciServizioEsterno(RestClientException ex) {
         log.warn("Chiamata a servizio esterno fallita: {}", ex.getMessage());
