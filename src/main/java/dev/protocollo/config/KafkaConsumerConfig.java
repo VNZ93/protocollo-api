@@ -2,6 +2,7 @@ package dev.protocollo.config;
 
 import dev.protocollo.messaging.RichiestaProtocollazioneEvent;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.springframework.boot.autoconfigure.kafka.KafkaConnectionDetails;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,14 +23,22 @@ import java.util.Map;
  * dedicata, costruita riusando le proprieta comuni (bootstrap-servers,
  * ErrorHandlingDeserializer, trusted packages) e sovrascrivendo solo
  * group-id e tipo di default.
+ *
+ * {@code KafkaProperties.buildConsumerProperties} non basta da solo: il
+ * bootstrap-servers effettivo (es. quello assegnato da Testcontainers nei
+ * test) viene applicato da Spring Boot tramite {@link KafkaConnectionDetails},
+ * non tramite {@code KafkaProperties}. Va quindi riapplicato esplicitamente,
+ * altrimenti questa ConsumerFactory dedicata finisce per puntare al default
+ * "localhost:9092" invece del broker reale.
  */
 @Configuration
 public class KafkaConsumerConfig {
 
     @Bean
     public ConsumerFactory<String, RichiestaProtocollazioneEvent> protocollazioneConsumerFactory(
-            KafkaProperties kafkaProperties) {
+            KafkaProperties kafkaProperties, KafkaConnectionDetails connectionDetails) {
         Map<String, Object> proprieta = new HashMap<>(kafkaProperties.buildConsumerProperties(null));
+        proprieta.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, connectionDetails.getConsumerBootstrapServers());
         proprieta.put(ConsumerConfig.GROUP_ID_CONFIG, "protocollo-protocollazione");
         proprieta.put(JsonDeserializer.VALUE_DEFAULT_TYPE, RichiestaProtocollazioneEvent.class.getName());
         return new DefaultKafkaConsumerFactory<>(proprieta);
