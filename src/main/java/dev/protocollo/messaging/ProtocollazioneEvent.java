@@ -21,7 +21,9 @@ public record ProtocollazioneEvent(
     /** Tipo di operazione che ha generato l'evento. */
     public enum TipoOperazione {
         CREAZIONE,
-        AGGIORNAMENTO
+        AGGIORNAMENTO,
+        APPROVAZIONE,
+        PROTOCOLLAZIONE
     }
 
     public static ProtocollazioneEvent di(TipoOperazione operazione,

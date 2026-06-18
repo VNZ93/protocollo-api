@@ -9,6 +9,9 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
+import java.util.List;
+
 /**
  * Repository Spring Data per l'entita {@link Documento}.
  *
@@ -43,4 +46,11 @@ public interface DocumentoRepository
             where lower(d.titolo) like lower(concat('%', :testo, '%'))
             """)
     Page<Documento> cercaPerTitolo(@Param("testo") String testo, Pageable pageable);
+
+    /**
+     * Documenti approvati, non ancora accodati per la protocollazione, il cui
+     * ritardo configurato e scaduto. Usata dal job di scansione schedulato.
+     */
+    List<Documento> findByStatoAndProtocollazioneInCodaFalseAndDataApprovazioneLessThanEqual(
+            StatoDocumento stato, Instant scadenza);
 }

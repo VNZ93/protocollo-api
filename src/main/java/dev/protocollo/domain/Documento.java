@@ -65,6 +65,26 @@ public class Documento {
     @Column(name = "data_indicizzazione")
     private Instant dataIndicizzazione;
 
+    /**
+     * Tag indipendente dallo stato: un documento archiviato resta nel suo
+     * stato del ciclo di vita (bozza/approvata/protocollato) ma non e piu
+     * operativo e finisce nel tab "Archivio".
+     */
+    @Column(nullable = false)
+    private boolean archiviato = false;
+
+    /** Momento dell'approvazione da parte di un amministratore. */
+    @Column(name = "data_approvazione")
+    private Instant dataApprovazione;
+
+    /**
+     * Indica che il documento e gia stato accodato per la protocollazione
+     * automatica (messaggio scritto sull'outbox/Kafka): evita che il job di
+     * scansione lo rimetta in coda piu volte mentre il consumer lo elabora.
+     */
+    @Column(name = "protocollazione_in_coda", nullable = false)
+    private boolean protocollazioneInCoda = false;
+
     @Column(name = "data_creazione", nullable = false, updatable = false)
     private Instant dataCreazione;
 
@@ -187,6 +207,30 @@ public class Documento {
 
     public Instant getDataAggiornamento() {
         return dataAggiornamento;
+    }
+
+    public boolean isArchiviato() {
+        return archiviato;
+    }
+
+    public void setArchiviato(boolean archiviato) {
+        this.archiviato = archiviato;
+    }
+
+    public Instant getDataApprovazione() {
+        return dataApprovazione;
+    }
+
+    public void setDataApprovazione(Instant dataApprovazione) {
+        this.dataApprovazione = dataApprovazione;
+    }
+
+    public boolean isProtocollazioneInCoda() {
+        return protocollazioneInCoda;
+    }
+
+    public void setProtocollazioneInCoda(boolean protocollazioneInCoda) {
+        this.protocollazioneInCoda = protocollazioneInCoda;
     }
 
     public Long getVersion() {

@@ -68,6 +68,13 @@ app:
   kafka:
     topic-protocollazione: ${KAFKA_TOPIC:protocollo.documenti.protocollazione}
     topic-indice: ${KAFKA_TOPIC_INDICE:protocollo.indice.aggiornamenti}
+    # Coda di lavoro della protocollazione automatica (vedi ProtocollazioneConsumer)
+    topic-protocollazione-lavoro: ${KAFKA_TOPIC_PROTOCOLLAZIONE_LAVORO:protocollo.documenti.protocollazione.richieste}
+  # Workflow di approvazione: ritardo prima della protocollazione automatica e
+  # frequenza con cui il job di scansione cerca documenti approvati scaduti
+  protocollazione:
+    ritardo-secondi: ${PROTOCOLLAZIONE_RITARDO_SECONDI:60}
+    intervallo-controllo-ms: ${PROTOCOLLAZIONE_INTERVALLO_MS:10000}
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:true}
     capacity: ${RATE_LIMIT_CAPACITY:100}
@@ -78,8 +85,8 @@ app:
   # Servizi a cui l'utente risulta accreditato (finiscono nel PDF)
   accreditamento:
     servizi:
-      - Portale Servizi
-      - Portale Cloud
+      - Gestione Documentale
+      - Archiviazione Digitale
       - API Gateway
   # Microservizio esterno di profilo (ipotetico) chiamato via RestClient
   servizio-profilo:

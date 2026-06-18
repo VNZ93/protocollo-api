@@ -8,9 +8,9 @@ public enum StatoDocumento {
     /** Documento appena creato, ancora modificabile liberamente. */
     BOZZA,
 
-    /** Documento a cui e stato assegnato un numero di protocollo. */
-    PROTOCOLLATO,
+    /** Documento approvato da un amministratore, in attesa di protocollazione automatica. */
+    APPROVATA,
 
-    /** Documento archiviato, non piu operativo. */
-    ARCHIVIATO
+    /** Documento a cui e stato assegnato un numero di protocollo. */
+    PROTOCOLLATO
 }

@@ -45,6 +45,9 @@ public final class DocumentoSpecifications {
             if (filtro.creatoA() != null) {
                 predicati.add(cb.lessThanOrEqualTo(root.get("dataCreazione"), filtro.creatoA()));
             }
+            if (filtro.archiviato() != null) {
+                predicati.add(cb.equal(root.get("archiviato"), filtro.archiviato()));
+            }
 
             // Se nessun filtro e valorizzato, la lista e vuota: nessun vincolo (restituisce tutto)
             return cb.and(predicati.toArray(new Predicate[0]));

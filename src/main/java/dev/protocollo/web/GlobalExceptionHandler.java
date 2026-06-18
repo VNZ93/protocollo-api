@@ -2,6 +2,7 @@ package dev.protocollo.web;
 
 import dev.protocollo.service.RefreshTokenNonValidoException;
 import dev.protocollo.service.RisorsaNonTrovataException;
+import dev.protocollo.service.TransizioneStatoNonValidaException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -32,6 +33,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RisorsaNonTrovataException.class)
     public ProblemDetail gestisciNonTrovata(RisorsaNonTrovataException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /** Transizione di stato non consentita (es. modifica dopo l'approvazione): 409 Conflict. */
+    @ExceptionHandler(TransizioneStatoNonValidaException.class)
+    public ProblemDetail gestisciTransizioneNonValida(TransizioneStatoNonValidaException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     /** Permessi insufficienti: 403 Forbidden. */

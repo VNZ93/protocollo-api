@@ -62,11 +62,22 @@ class DocumentoControllerTest {
         return new UtenteAutenticato(utente);
     }
 
+    private UtenteAutenticato principalAdmin() {
+        Utente utente = new Utente("admin", "hash", "Amministratore", Set.of(Ruolo.ADMIN));
+        return new UtenteAutenticato(utente);
+    }
+
     private Documento documentoDiEsempio() {
         Documento documento = new Documento("Titolo", "Contenuto", "mrossi");
         ReflectionTestUtils.setField(documento, "id", 1L);
         documento.setNumeroProtocollo("PRT-2026-000001");
         documento.setStato(StatoDocumento.PROTOCOLLATO);
+        return documento;
+    }
+
+    private Documento bozzaDiEsempio() {
+        Documento documento = new Documento("Titolo", "Contenuto", "mrossi");
+        ReflectionTestUtils.setField(documento, "id", 1L);
         return documento;
     }
 
@@ -82,9 +93,9 @@ class DocumentoControllerTest {
     }
 
     @Test
-    void postCreaRestituisce201ConIlDocumentoCreato() throws Exception {
+    void postCreaRestituisce201ConIlDocumentoInBozza() throws Exception {
         when(documentoService.crea(eq("Titolo"), eq("Contenuto"), any()))
-                .thenReturn(documentoDiEsempio());
+                .thenReturn(bozzaDiEsempio());
 
         DocumentoRequest richiesta = new DocumentoRequest("Titolo", "Contenuto");
 
@@ -95,7 +106,7 @@ class DocumentoControllerTest {
                         .content(objectMapper.writeValueAsString(richiesta)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(1))
-                .andExpect(jsonPath("$.stato").value("PROTOCOLLATO"));
+                .andExpect(jsonPath("$.stato").value("BOZZA"));
     }
 
     @Test
@@ -109,5 +120,43 @@ class DocumentoControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(richiesta)))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void postApprovaComeAmministratoreRestituisceIlDocumentoApprovato() throws Exception {
+        Documento approvato = bozzaDiEsempio();
+        approvato.setStato(StatoDocumento.APPROVATA);
+        when(documentoService.approva(eq(1L), any())).thenReturn(approvato);
+
+        mockMvc.perform(post("/api/documenti/1/approva")
+                        .with(user(principalAdmin()))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.stato").value("APPROVATA"));
+    }
+
+    @Test
+    void postArchiviaRestituisceIlDocumentoArchiviato() throws Exception {
+        Documento archiviato = documentoDiEsempio();
+        archiviato.setArchiviato(true);
+        when(documentoService.archivia(eq(1L), any())).thenReturn(archiviato);
+
+        mockMvc.perform(post("/api/documenti/1/archivia")
+                        .with(user(principal()))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.archiviato").value(true));
+    }
+
+    @Test
+    void postDisarchiviaRestituisceIlDocumentoNonArchiviato() throws Exception {
+        Documento documento = documentoDiEsempio();
+        when(documentoService.disarchivia(eq(1L), any())).thenReturn(documento);
+
+        mockMvc.perform(post("/api/documenti/1/disarchivia")
+                        .with(user(principal()))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.archiviato").value(false));
     }
 }

@@ -37,4 +37,17 @@ public class KafkaTopicConfig {
                 .replicas(1)
                 .build();
     }
+
+    /**
+     * Coda di lavoro della protocollazione automatica: il job di scansione in
+     * {@code DocumentoService} ci scrive, {@code ProtocollazioneConsumer} la consuma.
+     */
+    @Bean
+    public NewTopic topicProtocollazioneLavoro(
+            @Value("${app.kafka.topic-protocollazione-lavoro}") String nomeTopic) {
+        return TopicBuilder.name(nomeTopic)
+                .partitions(1)
+                .replicas(1)
+                .build();
+    }
 }

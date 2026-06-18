@@ -14,11 +14,13 @@ import java.time.Instant;
  * @param testo        testo da cercare nel titolo (case-insensitive)
  * @param creatoDa     data minima di creazione (inclusa)
  * @param creatoA      data massima di creazione (inclusa)
+ * @param archiviato   filtra per tag di archiviazione (indipendente dallo stato)
  */
 public record FiltroDocumenti(
         StatoDocumento stato,
         String proprietario,
         String testo,
         Instant creatoDa,
-        Instant creatoA) {
+        Instant creatoA,
+        Boolean archiviato) {
 }

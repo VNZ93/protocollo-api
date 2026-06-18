@@ -38,8 +38,11 @@ import java.time.Instant;
  *  - GET  /api/documenti          elenco paginato e filtrabile
  *  - GET  /api/documenti/{id}     dettaglio singolo (con cache)
  *  - GET  /api/documenti/{id}/pdf download del PDF dallo storage
- *  - POST /api/documenti          creazione (ruolo USER o ADMIN)
- *  - PUT  /api/documenti/{id}     aggiornamento (solo proprietario o ADMIN)
+ *  - POST /api/documenti          creazione di una bozza (ruolo USER o ADMIN, non ADMIN)
+ *  - PUT  /api/documenti/{id}     aggiornamento (solo proprietario o ADMIN, solo se in BOZZA)
+ *  - POST /api/documenti/{id}/approva     approvazione bozza (solo ADMIN)
+ *  - POST /api/documenti/{id}/archivia    aggiunge il tag di archiviazione
+ *  - POST /api/documenti/{id}/disarchivia rimuove il tag di archiviazione
  *
  * L'utente autenticato viene iniettato con {@code @AuthenticationPrincipal}:
  * e l'oggetto messo nel SecurityContext dal filtro JWT.
@@ -67,9 +70,10 @@ public class DocumentoController {
             @RequestParam(required = false) String testo,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant creatoDa,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant creatoA,
+            @RequestParam(required = false) Boolean archiviato,
             Pageable pageable) {
 
-        FiltroDocumenti filtro = new FiltroDocumenti(stato, proprietario, testo, creatoDa, creatoA);
+        FiltroDocumenti filtro = new FiltroDocumenti(stato, proprietario, testo, creatoDa, creatoA, archiviato);
         return documentoService.elenca(filtro, pageable).map(DocumentoResponse::da);
     }
 
@@ -103,7 +107,7 @@ public class DocumentoController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
-    @Operation(summary = "Crea un nuovo documento, genera il PDF e pubblica la protocollazione su Kafka")
+    @Operation(summary = "Crea un nuovo documento in stato BOZZA (solo utenti non amministratori)")
     public DocumentoResponse crea(@Valid @RequestBody DocumentoRequest richiesta,
                                   @AuthenticationPrincipal UtenteAutenticato utente) {
         Documento documento = documentoService.crea(
@@ -117,12 +121,48 @@ public class DocumentoController {
      */
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
-    @Operation(summary = "Aggiorna un documento esistente, rigenera il PDF e pubblica l'evento su Kafka")
+    @Operation(summary = "Aggiorna titolo e contenuto di una bozza esistente")
     public DocumentoResponse aggiorna(@PathVariable Long id,
                                       @Valid @RequestBody DocumentoRequest richiesta,
                                       @AuthenticationPrincipal UtenteAutenticato utente) {
         Documento documento = documentoService.aggiorna(
                 id, richiesta.titolo(), richiesta.contenuto(), utente);
+        return DocumentoResponse.da(documento);
+    }
+
+    /**
+     * Approvazione: solo un amministratore puo approvare una bozza, spostandola
+     * in APPROVATA. La protocollazione automatica avviene poi in background.
+     */
+    @PostMapping("/{id}/approva")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Approva una bozza, in attesa della protocollazione automatica")
+    public DocumentoResponse approva(@PathVariable Long id,
+                                     @AuthenticationPrincipal UtenteAutenticato utente) {
+        Documento documento = documentoService.approva(id, utente);
+        return DocumentoResponse.da(documento);
+    }
+
+    /**
+     * Archiviazione: imposta il tag indipendente dallo stato. L'autorizzazione
+     * fine (proprietario o amministratore) e verificata dentro il service.
+     */
+    @PostMapping("/{id}/archivia")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    @Operation(summary = "Marca un documento come archiviato")
+    public DocumentoResponse archivia(@PathVariable Long id,
+                                      @AuthenticationPrincipal UtenteAutenticato utente) {
+        Documento documento = documentoService.archivia(id, utente);
+        return DocumentoResponse.da(documento);
+    }
+
+    /** Rimuove il tag di archiviazione. */
+    @PostMapping("/{id}/disarchivia")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    @Operation(summary = "Rimuove il tag di archiviazione da un documento")
+    public DocumentoResponse disarchivia(@PathVariable Long id,
+                                         @AuthenticationPrincipal UtenteAutenticato utente) {
+        Documento documento = documentoService.disarchivia(id, utente);
         return DocumentoResponse.da(documento);
     }
 }

@@ -7,6 +7,7 @@ import dev.protocollo.domain.StatoDocumento;
 import dev.protocollo.domain.Utente;
 import dev.protocollo.messaging.IndiceAggiornamentoEvent;
 import dev.protocollo.messaging.ProtocollazioneEvent;
+import dev.protocollo.messaging.RichiestaProtocollazioneEvent;
 import dev.protocollo.messaging.outbox.OutboxService;
 import dev.protocollo.pdf.DatiAccreditamento;
 import dev.protocollo.pdf.DocumentoPdfService;
@@ -23,6 +24,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -31,6 +33,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -45,6 +50,8 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 class DocumentoServiceTest {
+
+    private static final long RITARDO_PROTOCOLLAZIONE_SECONDI = 60L;
 
     @Mock
     private DocumentoRepository documentoRepository;
@@ -71,7 +78,8 @@ class DocumentoServiceTest {
                 outboxService,
                 documentStorage,
                 pdfService,
-                new AccreditamentoProperties(List.of("Portale Servizi")));
+                new AccreditamentoProperties(List.of("Gestione Documentale")),
+                RITARDO_PROTOCOLLAZIONE_SECONDI);
     }
 
     // --- Helper ---------------------------------------------------------------
@@ -81,14 +89,14 @@ class DocumentoServiceTest {
         return new UtenteAutenticato(u);
     }
 
-    private Documento documentoEsistente(Long id, String proprietario) {
+    private Documento documentoEsistente(Long id, String proprietario, StatoDocumento stato) {
         Documento documento = new Documento("Titolo originale", "Contenuto", proprietario);
         ReflectionTestUtils.setField(documento, "id", id);
-        documento.setStato(StatoDocumento.PROTOCOLLATO);
+        documento.setStato(stato);
         return documento;
     }
 
-    /** Stub comuni a creazione e aggiornamento: generazione e salvataggio del PDF. */
+    /** Stub comuni alla protocollazione: generazione e salvataggio del PDF. */
     private void stubPdf() {
         when(pdfService.genera(any(DatiAccreditamento.class))).thenReturn(new byte[]{1, 2, 3});
         when(documentStorage.salva(any(), any(), any())).thenReturn("documenti/test.pdf");
@@ -97,9 +105,7 @@ class DocumentoServiceTest {
     // --- Creazione ------------------------------------------------------------
 
     @Test
-    void laCreazioneAssegnaProtocolloGeneraPdfERegistraEventoNellOutbox() {
-        stubPdf();
-        // Il save simula il DB assegnando l'id all'entita e restituendola
+    void laCreazioneProduceUnaBozzaSenzaProtocolloNePdfERegistraEventoNellOutbox() {
         when(documentoRepository.save(any(Documento.class))).thenAnswer(invocazione -> {
             Documento daSalvare = invocazione.getArgument(0);
             ReflectionTestUtils.setField(daSalvare, "id", 42L);
@@ -111,11 +117,10 @@ class DocumentoServiceTest {
 
         assertThat(risultato.getId()).isEqualTo(42L);
         assertThat(risultato.getProprietario()).isEqualTo("mrossi");
-        assertThat(risultato.getStato()).isEqualTo(StatoDocumento.PROTOCOLLATO);
-        assertThat(risultato.getNumeroProtocollo()).matches("PRT-\\d{4}-000042");
-        assertThat(risultato.getPdfRiferimento()).isEqualTo("documenti/test.pdf");
+        assertThat(risultato.getStato()).isEqualTo(StatoDocumento.BOZZA);
+        assertThat(risultato.getNumeroProtocollo()).isNull();
+        assertThat(risultato.getPdfRiferimento()).isNull();
 
-        // Verifico che sia stato registrato un evento di tipo CREAZIONE nell'outbox
         ArgumentCaptor<ProtocollazioneEvent> captor =
                 ArgumentCaptor.forClass(ProtocollazioneEvent.class);
         verify(outboxService).registraProtocollazione(captor.capture());
@@ -123,13 +128,22 @@ class DocumentoServiceTest {
                 .isEqualTo(ProtocollazioneEvent.TipoOperazione.CREAZIONE);
     }
 
+    @Test
+    void unAmministratoreNonPuoCreareDocumenti() {
+        assertThatThrownBy(() -> documentoService.crea(
+                "Titolo", "Contenuto", utente("admin", Ruolo.ADMIN)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(documentoRepository, never()).save(any());
+        verify(outboxService, never()).registraProtocollazione(any());
+    }
+
     // --- Aggiornamento --------------------------------------------------------
 
     @Test
-    void ilProprietarioPuoAggiornareIlProprioDocumento() {
-        stubPdf();
+    void ilProprietarioPuoAggiornareUnaPropriaBozza() {
         when(documentoRepository.findById(1L))
-                .thenReturn(Optional.of(documentoEsistente(1L, "mrossi")));
+                .thenReturn(Optional.of(documentoEsistente(1L, "mrossi", StatoDocumento.BOZZA)));
 
         Documento risultato = documentoService.aggiorna(
                 1L, "Titolo aggiornato", "Nuovo contenuto", utente("mrossi", Ruolo.USER));
@@ -139,10 +153,9 @@ class DocumentoServiceTest {
     }
 
     @Test
-    void unAmministratorePuoAggiornareDocumentiAltrui() {
-        stubPdf();
+    void unAmministratorePuoAggiornareBozzeAltrui() {
         when(documentoRepository.findById(1L))
-                .thenReturn(Optional.of(documentoEsistente(1L, "mrossi")));
+                .thenReturn(Optional.of(documentoEsistente(1L, "mrossi", StatoDocumento.BOZZA)));
 
         Documento risultato = documentoService.aggiorna(
                 1L, "Corretto da admin", "Contenuto", utente("admin", Ruolo.ADMIN));
@@ -153,7 +166,7 @@ class DocumentoServiceTest {
     @Test
     void unUtenteNonProprietarioNonPuoAggiornareEnonRegistraEventi() {
         when(documentoRepository.findById(1L))
-                .thenReturn(Optional.of(documentoEsistente(1L, "mrossi")));
+                .thenReturn(Optional.of(documentoEsistente(1L, "mrossi", StatoDocumento.BOZZA)));
 
         assertThatThrownBy(() -> documentoService.aggiorna(
                 1L, "Tentativo", "Contenuto", utente("altro", Ruolo.USER)))
@@ -171,17 +184,181 @@ class DocumentoServiceTest {
                 .isInstanceOf(RisorsaNonTrovataException.class);
     }
 
+    @Test
+    void aggiornareUnDocumentoNonPiuInBozzaLanciaTransizioneNonValida() {
+        when(documentoRepository.findById(1L))
+                .thenReturn(Optional.of(documentoEsistente(1L, "mrossi", StatoDocumento.PROTOCOLLATO)));
+
+        assertThatThrownBy(() -> documentoService.aggiorna(
+                1L, "Tentativo", "Contenuto", utente("mrossi", Ruolo.USER)))
+                .isInstanceOf(TransizioneStatoNonValidaException.class);
+
+        verify(outboxService, never()).registraProtocollazione(any());
+    }
+
+    // --- Approvazione -----------------------------------------------------------
+
+    @Test
+    void unAmministratorePuoApprovareUnaBozza() {
+        when(documentoRepository.findById(1L))
+                .thenReturn(Optional.of(documentoEsistente(1L, "mrossi", StatoDocumento.BOZZA)));
+
+        Documento risultato = documentoService.approva(1L, utente("admin", Ruolo.ADMIN));
+
+        assertThat(risultato.getStato()).isEqualTo(StatoDocumento.APPROVATA);
+        assertThat(risultato.getDataApprovazione()).isNotNull();
+
+        ArgumentCaptor<ProtocollazioneEvent> captor =
+                ArgumentCaptor.forClass(ProtocollazioneEvent.class);
+        verify(outboxService).registraProtocollazione(captor.capture());
+        assertThat(captor.getValue().operazione())
+                .isEqualTo(ProtocollazioneEvent.TipoOperazione.APPROVAZIONE);
+    }
+
+    @Test
+    void unNonAmministratoreNonPuoApprovare() {
+        assertThatThrownBy(() -> documentoService.approva(1L, utente("mrossi", Ruolo.USER)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(documentoRepository, never()).findById(any());
+    }
+
+    @Test
+    void nonSiPuoApprovareUnDocumentoNonInBozza() {
+        when(documentoRepository.findById(1L))
+                .thenReturn(Optional.of(documentoEsistente(1L, "mrossi", StatoDocumento.APPROVATA)));
+
+        assertThatThrownBy(() -> documentoService.approva(1L, utente("admin", Ruolo.ADMIN)))
+                .isInstanceOf(TransizioneStatoNonValidaException.class);
+    }
+
+    // --- Scansione per la protocollazione automatica -----------------------------
+
+    @Test
+    void unDocumentoApprovatoScadutoVieneAccodatoPerLaProtocollazione() {
+        Documento documento = documentoEsistente(1L, "mrossi", StatoDocumento.APPROVATA);
+        when(documentoRepository.findByStatoAndProtocollazioneInCodaFalseAndDataApprovazioneLessThanEqual(
+                eq(StatoDocumento.APPROVATA), any(Instant.class)))
+                .thenReturn(List.of(documento));
+
+        documentoService.avviaProtocollazioneScadute();
+
+        assertThat(documento.isProtocollazioneInCoda()).isTrue();
+
+        ArgumentCaptor<RichiestaProtocollazioneEvent> captor =
+                ArgumentCaptor.forClass(RichiestaProtocollazioneEvent.class);
+        verify(outboxService).registraRichiestaProtocollazione(captor.capture());
+        assertThat(captor.getValue().idDocumento()).isEqualTo(1L);
+    }
+
+    @Test
+    void unErroreSuUnDocumentoNonBloccaLaScansioneDegliAltri() {
+        Documento primo = documentoEsistente(1L, "mrossi", StatoDocumento.APPROVATA);
+        Documento secondo = documentoEsistente(2L, "mbianchi", StatoDocumento.APPROVATA);
+        when(documentoRepository.findByStatoAndProtocollazioneInCodaFalseAndDataApprovazioneLessThanEqual(
+                eq(StatoDocumento.APPROVATA), any(Instant.class)))
+                .thenReturn(List.of(primo, secondo));
+        doThrow(new RuntimeException("outbox non disponibile"))
+                .when(outboxService).registraRichiestaProtocollazione(
+                        argThat(evento -> evento.idDocumento().equals(1L)));
+
+        assertThatCode(() -> documentoService.avviaProtocollazioneScadute())
+                .doesNotThrowAnyException();
+
+        assertThat(secondo.isProtocollazioneInCoda()).isTrue();
+        verify(outboxService).registraRichiestaProtocollazione(
+                argThat(evento -> evento.idDocumento().equals(2L)));
+    }
+
+    // --- Esecuzione della protocollazione automatica -----------------------------
+
+    @Test
+    void laProtocollazioneAutomaticaAssegnaProtocolloPdfECambiaStato() {
+        stubPdf();
+        Documento documento = documentoEsistente(1L, "mrossi", StatoDocumento.APPROVATA);
+        ReflectionTestUtils.setField(documento, "protocollazioneInCoda", true);
+        when(documentoRepository.findById(1L)).thenReturn(Optional.of(documento));
+
+        documentoService.eseguiProtocollazione(1L);
+
+        assertThat(documento.getStato()).isEqualTo(StatoDocumento.PROTOCOLLATO);
+        assertThat(documento.getNumeroProtocollo()).matches("PRT-\\d{4}-000001");
+        assertThat(documento.getPdfRiferimento()).isEqualTo("documenti/test.pdf");
+        assertThat(documento.isProtocollazioneInCoda()).isFalse();
+
+        ArgumentCaptor<ProtocollazioneEvent> captor =
+                ArgumentCaptor.forClass(ProtocollazioneEvent.class);
+        verify(outboxService).registraProtocollazione(captor.capture());
+        assertThat(captor.getValue().operazione())
+                .isEqualTo(ProtocollazioneEvent.TipoOperazione.PROTOCOLLAZIONE);
+    }
+
+    @Test
+    void laProtocollazioneAutomaticaSuUnDocumentoGiaProtocollatoNonFaNulla() {
+        Documento documento = documentoEsistente(1L, "mrossi", StatoDocumento.PROTOCOLLATO);
+        when(documentoRepository.findById(1L)).thenReturn(Optional.of(documento));
+
+        documentoService.eseguiProtocollazione(1L);
+
+        verify(outboxService, never()).registraProtocollazione(any());
+        verify(pdfService, never()).genera(any());
+    }
+
+    @Test
+    void laProtocollazioneAutomaticaSuUnDocumentoInesistenteNonFaNulla() {
+        when(documentoRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatCode(() -> documentoService.eseguiProtocollazione(99L))
+                .doesNotThrowAnyException();
+
+        verify(outboxService, never()).registraProtocollazione(any());
+    }
+
+    // --- Archiviazione ------------------------------------------------------------
+
+    @Test
+    void ilProprietarioPuoArchiviareUnDocumentoInQualsiasiStato() {
+        Documento documento = documentoEsistente(1L, "mrossi", StatoDocumento.PROTOCOLLATO);
+        when(documentoRepository.findById(1L)).thenReturn(Optional.of(documento));
+
+        Documento risultato = documentoService.archivia(1L, utente("mrossi", Ruolo.USER));
+
+        assertThat(risultato.isArchiviato()).isTrue();
+        assertThat(risultato.getStato()).isEqualTo(StatoDocumento.PROTOCOLLATO);
+        verify(outboxService, never()).registraProtocollazione(any());
+    }
+
+    @Test
+    void siPuoRimuovereIlTagDiArchiviazione() {
+        Documento documento = documentoEsistente(1L, "mrossi", StatoDocumento.PROTOCOLLATO);
+        documento.setArchiviato(true);
+        when(documentoRepository.findById(1L)).thenReturn(Optional.of(documento));
+
+        Documento risultato = documentoService.disarchivia(1L, utente("mrossi", Ruolo.USER));
+
+        assertThat(risultato.isArchiviato()).isFalse();
+    }
+
+    @Test
+    void unUtenteNonProprietarioNonPuoArchiviare() {
+        when(documentoRepository.findById(1L))
+                .thenReturn(Optional.of(documentoEsistente(1L, "mrossi", StatoDocumento.BOZZA)));
+
+        assertThatThrownBy(() -> documentoService.archivia(1L, utente("altro", Ruolo.USER)))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
     // --- Aggiornamento dall'indice esterno ------------------------------------
 
     @Test
     void unAggiornamentoDallIndiceAllineaStatoEMarcaIndicizzato() {
-        Documento documento = documentoEsistente(5L, "mrossi");
+        Documento documento = documentoEsistente(5L, "mrossi", StatoDocumento.BOZZA);
         when(documentoRepository.findById(5L)).thenReturn(Optional.of(documento));
 
         documentoService.applicaAggiornamentoIndice(
-                new IndiceAggiornamentoEvent(5L, StatoDocumento.ARCHIVIATO, "motore-indicizzazione"));
+                new IndiceAggiornamentoEvent(5L, StatoDocumento.APPROVATA, "motore-indicizzazione"));
 
-        assertThat(documento.getStato()).isEqualTo(StatoDocumento.ARCHIVIATO);
+        assertThat(documento.getStato()).isEqualTo(StatoDocumento.APPROVATA);
         assertThat(documento.isIndicizzato()).isTrue();
         assertThat(documento.getDataIndicizzazione()).isNotNull();
     }
@@ -191,7 +368,7 @@ class DocumentoServiceTest {
         when(documentoRepository.findById(7L)).thenReturn(Optional.empty());
 
         assertThatCode(() -> documentoService.applicaAggiornamentoIndice(
-                new IndiceAggiornamentoEvent(7L, StatoDocumento.ARCHIVIATO, "motore")))
+                new IndiceAggiornamentoEvent(7L, StatoDocumento.APPROVATA, "motore")))
                 .doesNotThrowAnyException();
     }
 }

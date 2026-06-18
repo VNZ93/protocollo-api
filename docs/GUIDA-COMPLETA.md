@@ -379,13 +379,22 @@ public enum Ruolo { USER, ADMIN }
 ### StatoDocumento (enum)
 **Cosa fa**: rappresenta il ciclo di vita di un documento.
 ```java
-public enum StatoDocumento { BOZZA, PROTOCOLLATO, ARCHIVIATO }
+public enum StatoDocumento { BOZZA, APPROVATA, PROTOCOLLATO }
 ```
-- `BOZZA`: appena creato (stato iniziale di default).
-- `PROTOCOLLATO`: ha ricevuto un numero di protocollo.
-- `ARCHIVIATO`: non piu operativo (vi si arriva, ad esempio, da un evento dell'indice).
-- Nell'entita `Documento` e salvato come **stringa** (`@Enumerated(STRING)`), quindi
-  nel DB si legge `PROTOCOLLATO` e non un numero: piu leggibile e robusto ai
+- `BOZZA`: appena creato da un utente non amministratore (stato iniziale di
+  default); solo in questo stato titolo e contenuto sono ancora modificabili.
+- `APPROVATA`: un amministratore ha approvato la bozza; da qui parte il
+  conto alla rovescia per la protocollazione automatica (vedi
+  `app.protocollazione.ritardo-secondi`).
+- `PROTOCOLLATO`: ha ricevuto un numero di protocollo e il PDF, assegnati
+  automaticamente da un job schedulato tramite un round-trip su Kafka (vedi
+  `avviaProtocollazioneScadute`/`eseguiProtocollazione`/`ProtocollazioneConsumer`).
+- L'archiviazione **non** e uno stato: e un flag booleano indipendente
+  (`Documento.archiviato`), applicabile in qualunque stato tramite gli endpoint
+  `/archivia` e `/disarchivia` — un documento archiviato resta nel suo stato
+  del ciclo di vita, ma compare sempre nel tab "Archivio" del frontend.
+- Nell'entita `Documento` lo stato e salvato come **stringa** (`@Enumerated(STRING)`),
+  quindi nel DB si legge `PROTOCOLLATO` e non un numero: piu leggibile e robusto ai
   riordini dell'enum.
 
 ### Documento (entita)
@@ -1049,19 +1058,48 @@ public Documento trova(Long id) {
 con lo stesso id non toccano il DB finche la voce non scade o non viene invalidata.
 
 `crea(titolo, contenuto, utente)` (`@Transactional`):
-1. costruisce il `Documento` con proprietario = username dell'utente;
-2. `save` -> ottiene l'`id` generato;
-3. assegna numero protocollo (`PRT-anno-id`) e stato `PROTOCOLLATO` (salvati al
-   commit per dirty checking, l'entita e managed);
-4. genera e salva il PDF (`generaESalvaPdf`), memorizza il riferimento;
-5. registra l'evento nell'outbox (`registraEvento`).
+1. se `utente.isAmministratore()` -> `AccessDeniedException` (solo un non-admin
+   puo creare una bozza);
+2. costruisce il `Documento` con proprietario = username dell'utente (stato
+   `BOZZA` di default, senza numero di protocollo ne PDF);
+3. `save` -> ottiene l'`id` generato;
+4. registra l'evento `CREAZIONE` nell'outbox (`registraEvento`).
 
 `aggiorna(id, ...)` (`@Transactional` + `@CacheEvict key=#id`):
 1. `trova(id)` (auto-invocazione: la cache non si applica, ottengo dati freschi);
 2. `verificaPermessoModifica`: se non sei proprietario ne admin ->
    `AccessDeniedException` (403);
-3. aggiorna titolo/contenuto, rigenera il PDF, registra l'evento;
-4. `@CacheEvict` invalida la voce in cache di quel documento.
+3. se `stato != BOZZA` -> `TransizioneStatoNonValidaException` (409): una volta
+   approvato (o protocollato) il contenuto e definitivo;
+4. aggiorna titolo/contenuto, registra l'evento `AGGIORNAMENTO`;
+5. `@CacheEvict` invalida la voce in cache di quel documento.
+
+`approva(id, utente)` (`@Transactional` + `@CacheEvict key=#id`): solo un admin
+puo approvare (altrimenti 403); il documento deve essere in `BOZZA` (altrimenti
+409); imposta `stato = APPROVATA` e `dataApprovazione = Instant.now()`; registra
+l'evento `APPROVAZIONE`.
+
+`avviaProtocollazioneScadute()` (`@Scheduled`, `@Transactional`): job di
+**rilevamento**, non esecuzione. Ogni `app.protocollazione.intervallo-controllo-ms`
+cerca i documenti `APPROVATA` non ancora in coda il cui ritardo
+(`app.protocollazione.ritardo-secondi`) e scaduto; per ciascuno marca
+`protocollazioneInCoda = true` e scrive nell'outbox una `RichiestaProtocollazioneEvent`
+destinata al topic Kafka dedicato `app.kafka.topic-protocollazione-lavoro`
+(stesso pattern Outbox usato per gli altri eventi, ma con un topic e un consumer
+propri). Un errore su un documento non blocca gli altri (try/catch nel loop).
+
+`eseguiProtocollazione(idDocumento)`: chiamato dal `ProtocollazioneConsumer`
+(non da HTTP) quando arriva il messaggio dal topic di lavoro. **Idempotente**:
+Kafka garantisce solo consegna "at-least-once", quindi se il documento non
+esiste piu o non e piu `APPROVATA` (gia protocollato, o messaggio duplicato) non
+fa nulla. Altrimenti assegna numero di protocollo e PDF (stessa logica di prima),
+imposta `stato = PROTOCOLLATO` e `protocollazioneInCoda = false`, registra
+l'evento `PROTOCOLLAZIONE`.
+
+`archivia(id, utente)` / `disarchivia(id, utente)` (`@Transactional` +
+`@CacheEvict key=#id`): stessi permessi di `aggiorna` (proprietario o admin);
+impostano solo il flag `archiviato`, indipendente dallo stato — nessun evento
+outbox, e un tag operativo non un passaggio del ciclo di vita.
 
 `scaricaPdf(id)` (`readOnly`): trova il documento; se non ha PDF -> 404; altrimenti
 legge i byte dallo storage.
@@ -1526,8 +1564,11 @@ letto, studiato e spiegato.
 - Il **numero di protocollo** ha formato `PRT-<anno>-<id a 6 cifre>`: semplice e
   leggibile. In un sistema reale la numerazione progressiva annuale richiederebbe
   attenzione alla concorrenza (sequenze dedicate).
-- La creazione **protocolla subito** il documento (stato `PROTOCOLLATO`): scelta per
-  semplicita didattica, cosi POST e PUT generano entrambi un evento.
+- La creazione produce una **bozza** (stato `BOZZA`, senza numero ne PDF): un
+  amministratore deve approvarla (`APPROVATA`) prima che un job schedulato la
+  protocolli automaticamente, dopo un ritardo configurabile, tramite un
+  round-trip su Kafka (vedi `DocumentoService.avviaProtocollazioneScadute`).
+  POST, PUT e l'approvazione generano comunque ciascuno un proprio evento.
 
 ---
 
@@ -1735,9 +1776,10 @@ scaduto o revocato).
 Richiesta: `{ "refreshToken": "..." }`. Risposta: **204 No Content**. Idempotente.
 
 ### GET /api/documenti
-Query string (tutti opzionali): `stato` (BOZZA|PROTOCOLLATO|ARCHIVIATO),
+Query string (tutti opzionali): `stato` (BOZZA|APPROVATA|PROTOCOLLATO),
 `proprietario`, `testo` (cerca nel titolo), `creatoDa`/`creatoA` (date ISO),
-`page`, `size`, `sort` (es. `dataCreazione,desc`).
+`archiviato` (filtra per il tag, indipendente dallo stato), `page`, `size`,
+`sort` (es. `dataCreazione,desc`).
 Esempio: `GET /api/documenti?stato=PROTOCOLLATO&testo=determina&page=0&size=10`.
 Risposta 200: pagina (contenuto + metadati di paginazione). Errori: 400 (valore di
 `stato` non valido), 401.
@@ -1754,12 +1796,22 @@ Permessi: ruolo USER o ADMIN. Richiesta:
 ```json
 { "titolo": "Determina X", "contenuto": "..." }
 ```
-Risposta 201: il documento creato (con numero protocollo, stato PROTOCOLLATO,
-riferimento PDF). Errori: 400 (titolo vuoto/troppo lungo), 401, 403.
+Risposta 201: il documento creato in stato `BOZZA` (senza numero di protocollo
+ne PDF: arrivano solo dopo approvazione e protocollazione automatica). Errori:
+400 (titolo vuoto/troppo lungo), 401, 403 (un amministratore non puo creare).
+
+### POST /api/documenti/{id}/approva
+Solo ADMIN. Sposta una bozza in `APPROVATA` e imposta `dataApprovazione`.
+Errori: 403 (non admin), 404, 409 (il documento non e in `BOZZA`).
+
+### POST /api/documenti/{id}/archivia e /disarchivia
+Proprietario o ADMIN. Impostano/rimuovono il tag `archiviato`, indipendente
+dallo stato del documento. Errori: 403, 404.
 
 ### PUT /api/documenti/{id}
 Permessi: proprietario o ADMIN (verifica nel service). Stesso body della POST.
-Risposta 200: documento aggiornato. Errori: 400, 401, 403, 404.
+Risposta 200: documento aggiornato. Errori: 400, 401, 403, 404, 409 (il
+documento non e piu in `BOZZA`: titolo/contenuto sono bloccati dopo l'approvazione).
 
 ### GET /api/profilo/{username}
 Risposta 200: `{ username, nomeCompleto, email, telefono, gruppi }`. Errori: 401,
@@ -1892,7 +1944,10 @@ passa dall'esterno e i segreti non si versionano.
 | `JWT_REFRESH_EXPIRATION_DAYS` | `app.jwt.refresh-expiration-days` | 7 | Durata refresh token. |
 | `KAFKA_TOPIC` | `app.kafka.topic-protocollazione` | protocollo.documenti.protocollazione | |
 | `KAFKA_TOPIC_INDICE` | `app.kafka.topic-indice` | protocollo.indice.aggiornamenti | |
+| `KAFKA_TOPIC_PROTOCOLLAZIONE_LAVORO` | `app.kafka.topic-protocollazione-lavoro` | protocollo.documenti.protocollazione.richieste | Topic di lavoro: il job di scansione scrive qui, `ProtocollazioneConsumer` legge da qui. |
 | `OUTBOX_POLLING_DELAY` | `app.outbox.polling-delay` | 5000 | ms tra un giro e l'altro. |
+| `PROTOCOLLAZIONE_RITARDO_SECONDI` | `app.protocollazione.ritardo-secondi` | 60 | Attesa dopo l'approvazione prima della protocollazione automatica. |
+| `PROTOCOLLAZIONE_INTERVALLO_MS` | `app.protocollazione.intervallo-controllo-ms` | 10000 | Frequenza del job di scansione `avviaProtocollazioneScadute`. |
 | `RATE_LIMIT_ENABLED` | `app.rate-limit.enabled` | true | |
 | `RATE_LIMIT_CAPACITY` | `app.rate-limit.capacity` | 100 | Gettoni max per IP. |
 | `RATE_LIMIT_REFILL` | `app.rate-limit.refill-per-minute` | 100 | Ricarica/minuto. |
@@ -1972,7 +2027,8 @@ Domande piu "tricky", con risposta ragionata.
   modifichi lo schema: imprevedibile e pericoloso in produzione. `validate` +
   migrazioni versionate (Flyway) e l'approccio controllato.
 - *Perche niente `delete` dei documenti?* Scelta di dominio: un protocollo non si
-  "cancella"; al massimo si archivia (stato `ARCHIVIATO`).
+  "cancella"; al massimo si archivia, impostando il tag `archiviato` (non e
+  un cambio di stato: il documento resta nel suo stato del ciclo di vita).
 - *Page direttamente nel JSON: problemi?* Il formato interno di `PageImpl` e instabile
   tra versioni; per questo si usa `@EnableSpringDataWebSupport(VIA_DTO)` che produce
   un JSON stabile.

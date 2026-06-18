@@ -22,7 +22,7 @@ in un'applicazione Java moderna.
 | Autorizzazione   | Ruoli nel token, `@PreAuthorize` e `@AuthenticationPrincipal` per i permessi  |
 | Persistenza      | Hibernate / JPA su **PostgreSQL**, ricerche dinamiche con Specification        |
 | Migrazioni DB    | **Flyway** (schema versionato in SQL)                                         |
-| Messaggistica    | **Kafka** con **pattern Outbox**: producer affidabile + **consumer** (indice) |
+| Messaggistica    | **Kafka** con **pattern Outbox**: producer affidabile + 2 **consumer** dedicati (indice esterno; protocollazione automatica) |
 | Generazione file | **PDF** da **template HTML** (Flying Saucer) salvato su **object storage**     |
 | Object storage   | Filesystem locale (profilo `dev`) o **S3/MinIO** (profilo `prod`)             |
 | Integrazione     | **RestClient** verso un microservizio esterno con mappatura JSON resiliente    |
@@ -55,13 +55,20 @@ flowchart TD
     Outbox --> Publisher[Outbox publisher schedulato]
     Publisher --> Kafka[(Kafka)]
 
-    KafkaIn[(Kafka: indice esterno)] --> Consumer[Consumer]
+    KafkaIn[(Kafka: indice esterno)] --> Consumer[IndiceConsumer]
     Consumer --> Service
+
+    Service -.scansione approvazioni scadute.-> Outbox
+    Kafka -.topic protocollazione-lavoro.-> ProtoConsumer[ProtocollazioneConsumer]
+    ProtoConsumer --> Service
 ```
 
 In sintesi: il `web` riceve le richieste e delega al `service`, che applica le
 regole di business e parla con `repository` (DB), `storage` (PDF) e con Kafka
-tramite l'outbox. Un consumer separato riceve gli aggiornamenti dall'indice esterno.
+tramite l'outbox. Un consumer separato riceve gli aggiornamenti dall'indice
+esterno; un secondo consumer dedicato riceve le richieste di protocollazione
+automatica generate da un job schedulato (vedi "Protocollazione automatica"
+piu sotto).
 
 ```
 src/main/java/dev/protocollo
@@ -202,12 +209,17 @@ TOKEN="incolla-qui-il-token"
 # Elenco documenti
 curl http://localhost:8080/api/documenti -H "Authorization: Bearer $TOKEN"
 
-# Creazione (genera un evento Kafka di protocollazione)
+# Creazione di una bozza (solo utente non amministratore, genera un evento Kafka)
 curl -X POST http://localhost:8080/api/documenti \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"titolo":"Determina X","contenuto":"..."}'
 ```
+
+Il documento creato e in stato `BOZZA`, senza numero di protocollo ne PDF: un
+amministratore deve approvarlo (`POST /api/documenti/{id}/approva`) prima che un
+job schedulato lo protocolli automaticamente, dopo un ritardo configurabile
+(default ~60s), tramite un round-trip su Kafka (vedi sotto).
 
 Trovi tutte le chiamate pronte all'uso anche nel file [`api.http`](api.http).
 
@@ -221,12 +233,17 @@ Trovi tutte le chiamate pronte all'uso anche nel file [`api.http`](api.http).
 | GET    | `/api/documenti`          | Elenco paginato e filtrabile         | autenticato           |
 | GET    | `/api/documenti/{id}`     | Dettaglio singolo (con cache)        | autenticato           |
 | GET    | `/api/documenti/{id}/pdf` | Scarica il PDF dallo storage         | autenticato           |
-| POST   | `/api/documenti`          | Crea + genera PDF + evento Kafka     | ruolo USER o ADMIN    |
-| PUT    | `/api/documenti/{id}`     | Aggiorna + rigenera PDF + evento     | proprietario o ADMIN  |
+| POST   | `/api/documenti`          | Crea una bozza (BOZZA) + evento Kafka | non amministratore  |
+| PUT    | `/api/documenti/{id}`     | Aggiorna + evento (solo se in BOZZA) | proprietario o ADMIN  |
+| POST   | `/api/documenti/{id}/approva`    | Approva una bozza (-> APPROVATA) | ADMIN              |
+| POST   | `/api/documenti/{id}/archivia`   | Imposta il tag `archiviato`      | proprietario o ADMIN  |
+| POST   | `/api/documenti/{id}/disarchivia`| Rimuove il tag `archiviato`      | proprietario o ADMIN  |
 | GET    | `/api/profilo/{user}`  | Dati di profilo da microservizio esterno | autenticato       |
 
 L'elenco supporta paginazione, ordinamento e filtri facoltativi, ad esempio:
 `GET /api/documenti?stato=PROTOCOLLATO&proprietario=mrossi&testo=determina&page=0&size=10&sort=dataCreazione,desc`
+oppure `GET /api/documenti?archiviato=true` per i soli documenti archiviati
+(il tag e indipendente dallo stato).
 
 ### Documentazione interattiva (Swagger)
 
@@ -265,8 +282,9 @@ interamente nel token.
 
 ## Eventi Kafka
 
-Alla creazione e all'aggiornamento di un documento viene pubblicato un evento sul
-topic `protocollo.documenti.protocollazione`. La pubblicazione usa il **pattern
+Creazione, aggiornamento, approvazione e protocollazione automatica di un
+documento pubblicano ciascuno un evento sul topic
+`protocollo.documenti.protocollazione`. La pubblicazione usa il **pattern
 Outbox** (vedi sotto): l'evento viene prima scritto su una tabella, nella stessa
 transazione del documento, e inviato a Kafka in un secondo momento.
 
@@ -277,14 +295,36 @@ Esempio di messaggio (JSON):
   "idDocumento": 3,
   "titolo": "Determina X",
   "numeroProtocollo": "PRT-2026-000003",
-  "proprietario": "admin",
+  "proprietario": "mrossi",
   "pdfRiferimento": "documenti/PRT-2026-000003.pdf",
-  "operazione": "CREAZIONE",
+  "operazione": "PROTOCOLLAZIONE",
   "timestamp": "2026-06-07T10:15:30Z"
 }
 ```
 
 Puoi vedere i messaggi nella Kafka UI su http://localhost:8081.
+
+### Protocollazione automatica: job schedulato + consumer dedicato
+
+La protocollazione non avviene mai "in linea" dentro una richiesta HTTP. Una
+volta che un documento e `APPROVATA`, il flusso e:
+
+1. Un job schedulato (`DocumentoService.avviaProtocollazioneScadute`, ogni
+   `app.protocollazione.intervallo-controllo-ms`) cerca le approvazioni il cui
+   ritardo (`app.protocollazione.ritardo-secondi`, default 60s) e scaduto e
+   scrive, per ciascuna, una richiesta nell'outbox destinata a un topic Kafka
+   **dedicato**: `protocollo.documenti.protocollazione.richieste`.
+2. `OutboxPublisher` la invia su quel topic, come per gli altri eventi.
+3. Un consumer dedicato (`ProtocollazioneConsumer`) la riceve e chiama
+   `DocumentoService.eseguiProtocollazione`, che assegna numero di protocollo e
+   PDF e sposta il documento in `PROTOCOLLATO`. E idempotente: un messaggio
+   duplicato (consegna "at-least-once") su un documento gia protocollato non fa
+   nulla.
+
+Il consumer ha una propria `ConsumerFactory`/`ContainerFactory`
+(`KafkaConsumerConfig`), separata da quella di default: ogni topic con un
+payload diverso ne ha bisogno, perche Spring Boot autoconfigura un solo tipo
+JSON di default per consumer.
 
 ### Consumer: aggiornamenti dall'indice esterno
 
@@ -296,7 +336,7 @@ documento locale (aggiorna lo stato, lo marca come indicizzato) e invalida la ca
 Per provarlo, pubblica un messaggio sul topic (ad esempio dalla Kafka UI):
 
 ```json
-{ "idDocumento": 1, "nuovoStato": "ARCHIVIATO", "origine": "motore-indicizzazione" }
+{ "idDocumento": 1, "nuovoStato": "APPROVATA", "origine": "motore-indicizzazione" }
 ```
 
 Il deserializzatore e protetto da un `ErrorHandlingDeserializer`: un messaggio

@@ -3,6 +3,7 @@ package dev.protocollo.messaging.outbox;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.protocollo.domain.OutboxEvent;
 import dev.protocollo.messaging.ProtocollazioneEvent;
+import dev.protocollo.messaging.RichiestaProtocollazioneEvent;
 import dev.protocollo.repository.OutboxEventRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,6 +75,9 @@ public class OutboxPublisher {
     private Object deserializza(OutboxEvent evento) throws Exception {
         if (OutboxService.TIPO_PROTOCOLLAZIONE.equals(evento.getTipo())) {
             return objectMapper.readValue(evento.getPayload(), ProtocollazioneEvent.class);
+        }
+        if (OutboxService.TIPO_RICHIESTA_PROTOCOLLAZIONE.equals(evento.getTipo())) {
+            return objectMapper.readValue(evento.getPayload(), RichiestaProtocollazioneEvent.class);
         }
         throw new IllegalStateException("Tipo di evento outbox sconosciuto: " + evento.getTipo());
     }

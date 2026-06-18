@@ -22,7 +22,9 @@ public record DocumentoResponse(
         boolean indicizzato,
         Instant dataIndicizzazione,
         Instant dataCreazione,
-        Instant dataAggiornamento) {
+        Instant dataAggiornamento,
+        boolean archiviato,
+        Instant dataApprovazione) {
 
     /** Costruisce il DTO a partire dall'entita di dominio. */
     public static DocumentoResponse da(Documento documento) {
@@ -37,6 +39,8 @@ public record DocumentoResponse(
                 documento.isIndicizzato(),
                 documento.getDataIndicizzazione(),
                 documento.getDataCreazione(),
-                documento.getDataAggiornamento());
+                documento.getDataAggiornamento(),
+                documento.isArchiviato(),
+                documento.getDataApprovazione());
     }
 }

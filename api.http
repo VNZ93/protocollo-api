@@ -1,11 +1,15 @@
 ### File di richieste HTTP di esempio.
 ### Funziona con il REST Client di VS Code o con l'HTTP Client di IntelliJ IDEA.
-### Esegui prima il login: i token vengono salvati nelle variabili sotto.
+### Esegui prima i login: i token vengono salvati nelle variabili sotto.
+###
+### Workflow dei documenti: BOZZA (creata da un utente non admin) -> APPROVATA
+### (un admin approva) -> PROTOCOLLATO (automatico, dopo circa un minuto, via
+### job schedulato + Kafka). L'archiviazione e un tag indipendente dallo stato.
 
 @host = http://localhost:8080
 
-### 1) Login (utente amministratore)
-# @name login
+### 1) Login (utente amministratore): serve per approvare e per i filtri generali
+# @name loginAdmin
 POST {{host}}/api/auth/login
 Content-Type: application/json
 
@@ -14,26 +18,41 @@ Content-Type: application/json
   "password": "admin123"
 }
 
-### Salvo i token restituiti dal login
-@accessToken = {{login.response.body.accessToken}}
-@refreshToken = {{login.response.body.refreshToken}}
+@accessTokenAdmin = {{loginAdmin.response.body.accessToken}}
+@refreshToken = {{loginAdmin.response.body.refreshToken}}
 
-### 2) Elenco paginato dei documenti
+### 2) Login (utente non amministratore): solo lui puo creare/modificare bozze
+# @name loginUtente
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "mrossi",
+  "password": "password123"
+}
+
+@accessTokenUtente = {{loginUtente.response.body.accessToken}}
+
+### 3) Elenco paginato dei documenti
 GET {{host}}/api/documenti?page=0&size=10&sort=dataCreazione,desc
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{accessTokenAdmin}}
 
-### 3) Elenco con filtri (stato + testo nel titolo)
+### 4) Elenco con filtri (stato + testo nel titolo)
 GET {{host}}/api/documenti?stato=PROTOCOLLATO&testo=determina
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{accessTokenAdmin}}
 
-### 4) Dettaglio di un documento (servito dalla cache dopo la prima lettura)
+### 4bis) Elenco dei soli documenti archiviati (tag indipendente dallo stato)
+GET {{host}}/api/documenti?archiviato=true
+Authorization: Bearer {{accessTokenAdmin}}
+
+### 5) Dettaglio di un documento (servito dalla cache dopo la prima lettura)
 GET {{host}}/api/documenti/1
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{accessTokenAdmin}}
 
-### 5) Creazione di un nuovo documento (genera PDF + evento Kafka)
+### 6) Creazione di una bozza (solo utente non amministratore, evento Kafka CREAZIONE)
 # @name creazione
 POST {{host}}/api/documenti
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{accessTokenUtente}}
 Content-Type: application/json
 
 {
@@ -41,16 +60,12 @@ Content-Type: application/json
   "contenuto": "Contenuto del documento creato via API."
 }
 
-### Salvo l'id del documento creato
+### Salvo l'id del documento creato (sara in stato BOZZA, senza numero ne PDF)
 @idDocumento = {{creazione.response.body.id}}
 
-### 6) Download del PDF del documento
-GET {{host}}/api/documenti/{{idDocumento}}/pdf
-Authorization: Bearer {{accessToken}}
-
-### 7) Aggiornamento del documento appena creato
+### 7) Aggiornamento della bozza (consentito solo finche e ancora BOZZA)
 PUT {{host}}/api/documenti/{{idDocumento}}
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{accessTokenUtente}}
 Content-Type: application/json
 
 {
@@ -58,7 +73,40 @@ Content-Type: application/json
   "contenuto": "Contenuto modificato via API."
 }
 
-### 8) Refresh: nuova coppia di token a partire dal refresh token
+### 8) Approvazione (solo admin): sposta in APPROVATA, registra dataApprovazione
+POST {{host}}/api/documenti/{{idDocumento}}/approva
+Authorization: Bearer {{accessTokenAdmin}}
+
+### Dopo l'approvazione il documento non e piu modificabile: questa richiesta
+### deve restituire 409 (TransizioneStatoNonValidaException)
+PUT {{host}}/api/documenti/{{idDocumento}}
+Authorization: Bearer {{accessTokenUtente}}
+Content-Type: application/json
+
+{
+  "titolo": "Tentativo dopo l'approvazione",
+  "contenuto": "Non dovrebbe funzionare."
+}
+
+### 9) Dopo circa un minuto (ritardo di default) il job schedulato accoda il
+### documento su Kafka e il consumer dedicato lo protocolla automaticamente:
+### ripeti questa GET finche "stato" non diventa PROTOCOLLATO.
+GET {{host}}/api/documenti/{{idDocumento}}
+Authorization: Bearer {{accessTokenAdmin}}
+
+### 10) Download del PDF (disponibile solo dopo la protocollazione automatica)
+GET {{host}}/api/documenti/{{idDocumento}}/pdf
+Authorization: Bearer {{accessTokenAdmin}}
+
+### 11) Archiviazione: tag indipendente dallo stato, in qualsiasi momento
+POST {{host}}/api/documenti/{{idDocumento}}/archivia
+Authorization: Bearer {{accessTokenUtente}}
+
+### 12) Rimozione del tag di archiviazione
+POST {{host}}/api/documenti/{{idDocumento}}/disarchivia
+Authorization: Bearer {{accessTokenUtente}}
+
+### 13) Refresh: nuova coppia di token a partire dal refresh token
 POST {{host}}/api/auth/refresh
 Content-Type: application/json
 
@@ -66,7 +114,7 @@ Content-Type: application/json
   "refreshToken": "{{refreshToken}}"
 }
 
-### 9) Logout: revoca il refresh token
+### 14) Logout: revoca il refresh token
 POST {{host}}/api/auth/logout
 Content-Type: application/json
 
@@ -74,10 +122,10 @@ Content-Type: application/json
   "refreshToken": "{{refreshToken}}"
 }
 
-### 10) Dati di profilo da microservizio esterno (ipotetico)
+### 15) Dati di profilo da microservizio esterno (ipotetico)
 ### Senza il servizio esterno reale risponde 502: e il comportamento atteso.
 GET {{host}}/api/profilo/mrossi
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{accessTokenAdmin}}
 
-### 11) Richiesta senza token: deve restituire 401
+### 16) Richiesta senza token: deve restituire 401
 GET {{host}}/api/documenti
