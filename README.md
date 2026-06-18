@@ -165,6 +165,19 @@ docker compose --profile app up -d --build
 ```
 
 Avvia infrastruttura **e** applicazione, gia configurate per comunicare tra loro.
+
+### In alternativa: script "one shot" (Windows, con frontend)
+
+```powershell
+./scripts/avvia-locale.ps1
+```
+
+Avvia infrastruttura Docker, backend (`mvnw.cmd spring-boot:run`) e, se trovato
+in una cartella `protocollo-frontend` accanto a questa, anche il frontend
+(`npm run dev`), ciascuno in una finestra dedicata, attendendo che backend e
+Postgres siano pronti prima di proseguire. Parametri: `-FrontendPath <path>`
+per indicare un percorso diverso, `-SkipFrontend` per avviare solo backend e
+infrastruttura.
 In questa modalita l'app gira in profilo `prod` e usa MinIO come object storage.
 
 ---
