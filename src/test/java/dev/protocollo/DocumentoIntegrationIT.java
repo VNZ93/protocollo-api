@@ -56,13 +56,17 @@ class DocumentoIntegrationIT {
 
     /**
      * Accorcio il ritardo e l'intervallo di scansione della protocollazione
-     * automatica: altrimenti il test dovrebbe attendere i 60 secondi reali
-     * di default per vedere il round-trip job->Kafka->consumer completarsi.
+     * automatica, oltre all'intervallo di polling dell'outbox: altrimenti il
+     * test dovrebbe attendere i 60 secondi reali di default per vedere il
+     * round-trip job->outbox->Kafka->consumer completarsi (l'outbox da solo
+     * pubblica ogni 5s di default, che sommati alla latenza dei runner CI
+     * possono far scadere il timeout di attendiStato).
      */
     @DynamicPropertySource
     static void proprietaProtocollazione(DynamicPropertyRegistry registry) {
         registry.add("app.protocollazione.ritardo-secondi", () -> "1");
         registry.add("app.protocollazione.intervallo-controllo-ms", () -> "500");
+        registry.add("app.outbox.polling-delay", () -> "300");
     }
 
     @Autowired
@@ -174,7 +178,7 @@ class DocumentoIntegrationIT {
      * (job schedulato + round-trip Kafka), non in risposta a una singola richiesta.
      */
     private DocumentoResponse attendiStato(Long id, HttpHeaders headers, String statoAtteso) {
-        Instant scadenza = Instant.now().plusSeconds(15);
+        Instant scadenza = Instant.now().plusSeconds(25);
         while (Instant.now().isBefore(scadenza)) {
             ResponseEntity<DocumentoResponse> risposta = restTemplate.exchange(
                     "/api/documenti/" + id, HttpMethod.GET,
